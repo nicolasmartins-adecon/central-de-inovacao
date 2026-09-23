@@ -132,6 +132,13 @@ CI.app = (function () {
     // fecha o menu móvel ao clicar no conteúdo
     elConteudo.addEventListener("click", () => casca.classList.remove("rail-aberto"));
 
+    // o trilho muda de largura conforme a janela: refaz o ajuste do e-mail
+    let tRedim;
+    addEventListener("resize", () => {
+      clearTimeout(tRedim);
+      tRedim = setTimeout(atualizarConexao, 150);
+    });
+
     desenharNav();
     atualizarConexao();
   }
@@ -164,6 +171,21 @@ CI.app = (function () {
     }
   }
 
+  /* Encolhe o texto até caber na largura disponível, com piso.
+     Uma medição só: a largura do texto cresce quase linear com o corpo da fonte,
+     e o text-overflow cuida da sobra. Se o elemento estiver escondido
+     (trilho recolhido), clientWidth é 0 e não há o que medir. */
+  function ajustarAoLargo(el, max, min) {
+    if (!el) return;
+    el.style.setProperty("--fs", max + "px");
+    const cabe = el.clientWidth;
+    if (!cabe) return;
+    const precisa = el.scrollWidth;
+    if (precisa <= cabe) return;
+    const corpo = Math.max(min, Math.floor((max * cabe / precisa) * 10) / 10);
+    el.style.setProperty("--fs", corpo + "px");
+  }
+
   function atualizarConexao() {
     if (!elConexao) return;
     const mapa = { local: "local", conectando: "conectando", online: "online", erro: "erro" };
@@ -172,10 +194,13 @@ CI.app = (function () {
     const s = elConexao.querySelector(".conexao-s");
     if (t) t.textContent = db.estado === "online" ? "Supabase" : db.mensagemEstado;
     if (s) {
+      const email = db.estado === "online" ? (db.usuario?.email || "") : "";
       s.textContent = db.estado === "online"
-        ? (db.usuario?.email || "conectado")
+        ? (email || "conectado")
         : db.estado === "local" ? "dados neste navegador"
         : db.estado === "erro" ? "verifique as chaves" : "…";
+      elConexao.title = email ? `${email} — estado da conexão` : "Estado da conexão";
+      ajustarAoLargo(s, 10, 7.4);
     }
   }
 
