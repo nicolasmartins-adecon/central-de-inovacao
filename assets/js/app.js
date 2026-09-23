@@ -13,6 +13,8 @@ CI.app = (function () {
   const ROTAS = [
     { id: "inicio",        hash: "#/inicio",        nome: "Início",        icone: "raio",       grupo: "Acompanhar",
       titulo: "Central de Inovação", rotulo: "página inicial" },
+    { id: "brainstorm",    hash: "#/brainstorm",    nome: "Brainstorm",    icone: "tempestade", grupo: "Acompanhar",
+      titulo: "Brainstorm", rotulo: "o banco de ideias da empresa", tom: "nuvem" },
     { id: "painel",        hash: "#/painel",        nome: "Painel",        icone: "painel",     grupo: "Acompanhar",
       titulo: "Painel de controle", rotulo: "visão geral do ciclo" },
     { id: "cronograma",    hash: "#/cronograma",    nome: "Cronograma",    icone: "cronograma", grupo: "Acompanhar",
@@ -157,6 +159,7 @@ CI.app = (function () {
         type: "button",
         "aria-current": rotaAtual === r.id ? "page" : null,
         title: r.nome,
+        dataset: r.tom ? { tom: r.tom } : null,
         onclick: () => { location.hash = r.hash; casca.classList.remove("rail-aberto"); }
       }, ic(r.icone), h("span", r.nome),
         contagens[r.id] ? h("span.nav-cont", String(contagens[r.id])) : null));
@@ -282,6 +285,7 @@ CI.app = (function () {
 
     try {
       switch (rotaAtual) {
+        case "brainstorm":    no = V.vBrainstorm(); break;
         case "painel":        no = V.vPainel(); break;
         case "cronograma":    no = V.vCronograma(); break;
         case "projetos":      no = V.vProjetos(); break;
