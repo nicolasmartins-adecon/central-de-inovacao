@@ -215,6 +215,45 @@ window.CI_SEED = (function () {
   const avaliacoes = [];
   const inscricoes = [];
 
+  /* Brainstorm — o banco de ideias aberto à empresa inteira.
+     Toda ideia nasce em "atração"; o funil é quem decide o resto.
+     Estes exemplos só aparecem no modo local; no Supabase a aba começa vazia. */
+  const agora = Date.now();
+  const haDias = n => new Date(agora - n * 86400000).toISOString();
+
+  const ideias = [
+    { id: "ide-1", titulo: "Trilha de onboarding em vídeo para novos membros",
+      descricao: "Cinco vídeos curtos gravados pelos próprios diretores, um por diretoria, para o membro novo entender a Adecon na primeira semana.",
+      tipo: "Processo", autor: "Gestão de Pessoas", email: "", diretoria_id: D.gp,
+      etapa: "qualificacao", ordem: 0, apoios: ["exemplo-a", "exemplo-b", "exemplo-c"],
+      arquivada: false, criado_em: haDias(12) },
+    { id: "ide-2", titulo: "Painel de prospecção com alertas de follow-up",
+      descricao: "Um lugar só para ver quem foi contatado, quando, e quem está esfriando sem resposta.",
+      tipo: "Ferramenta", autor: "Comercial", email: "", diretoria_id: D.com,
+      etapa: "atracao", ordem: 0, apoios: ["exemplo-a"],
+      arquivada: false, criado_em: haDias(6) },
+    { id: "ide-3", titulo: "Banco de cases da Adecon aberto ao mercado",
+      descricao: "Transformar os projetos entregues em cases publicáveis: resultado, método e depoimento do cliente.",
+      tipo: "Iniciativa", autor: "Marketing", email: "", diretoria_id: D.mkt,
+      etapa: "fechamento", ordem: 0, apoios: ["exemplo-a", "exemplo-b", "exemplo-c", "exemplo-d", "exemplo-e"],
+      arquivada: false, criado_em: haDias(21) },
+    { id: "ide-4", titulo: "Rodízio de membros entre diretorias por um dia",
+      descricao: "Cada membro passa um dia acompanhando outra diretoria. Barato, e derruba a barreira entre as áreas.",
+      tipo: "Iniciativa", autor: "Presidência", email: "", diretoria_id: D.conex,
+      etapa: "atracao", ordem: 1, apoios: ["exemplo-b", "exemplo-c"],
+      arquivada: false, criado_em: haDias(3) },
+    { id: "ide-5", titulo: "Checklist automático de encerramento de projeto",
+      descricao: "Nenhum projeto fecha sem relatório, feedback do cliente e registro das horas. O checklist trava o encerramento.",
+      tipo: "Processo", autor: "Projetos", email: "", diretoria_id: D.proj,
+      etapa: "qualificacao", ordem: 1, apoios: ["exemplo-d"],
+      arquivada: false, criado_em: haDias(9) },
+    { id: "ide-6", titulo: "Mural de agradecimentos entre membros",
+      descricao: "Um espaço leve para registrar quem ajudou quem na semana. Clima organizacional custa pouco e some rápido quando ninguém cuida.",
+      tipo: "Outro", autor: "Gestão de Pessoas", email: "", diretoria_id: D.gp,
+      etapa: "atracao", ordem: 2, apoios: [],
+      arquivada: false, criado_em: haDias(1) }
+  ];
+
   return { diretorias, projetos, etapas, comentarios, itens_diretoria,
-           implementacoes, avaliacoes, inscricoes };
+           implementacoes, avaliacoes, inscricoes, ideias };
 })();
