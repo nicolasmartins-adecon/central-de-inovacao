@@ -52,6 +52,7 @@
   --nuvem-ar:    rgba(94, 155, 224, .16);
   --raio-nucleo: #F2F8FF;
   --raio-halo:   #7FC0FF;
+  --raio-difusao:#CFE6FF;
 
   /* estado semântico */
   --ok:    #35C07E;
@@ -120,6 +121,7 @@
     --nuvem-ar:    rgba(46, 114, 196, .13);
     --raio-nucleo: #1D4FA0;
     --raio-halo:   #5D93DE;
+    --raio-difusao:#FFFFFF;
     --ok:    #12874F;
     --warn:  #A9780A;
     --crit:  #C4302B;
@@ -166,6 +168,7 @@
   --nuvem-ar:    rgba(46, 114, 196, .13);
   --raio-nucleo: #1D4FA0;
   --raio-halo:   #5D93DE;
+  --raio-difusao:#FFFFFF;
   --ok:    #12874F;
   --warn:  #A9780A;
   --crit:  #C4302B;
