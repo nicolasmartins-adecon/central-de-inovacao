@@ -2545,17 +2545,24 @@ CI.views = (function () {
     { x:   76, y:  27, r: 27, f: 3.1 }
   ];
 
+  /* Cada piscada nasce em `de`, atravessa a nuvem por dentro até `x` e, quando
+     não é `soDentro`, sai por baixo como raio de `comp` de comprimento. É assim
+     num temporal de verdade: a maior parte das descargas nunca sai da nuvem —
+     só acende ela por dentro. */
   const PISCADAS = [
-    { t:  520, x: -102, comp: 62, semente:  3, dur: 150 },
-    { t:  730, x: -102, comp: 62, semente:  3, dur:  95 },
-    { t: 2450, x:   66, comp: 78, semente: 11, dur: 175 },
-    { t: 2690, x:   66, comp: 78, semente: 11, dur:  80 },
-    { t: 4250, x:  -20, comp: 54, semente: 27, dur: 105 },
-    { t: 4410, x:  -20, comp: 54, semente: 27, dur:  65 },
-    { t: 4560, x:  -20, comp: 54, semente: 27, dur: 135 },
-    { t: 6350, x:  122, comp: 70, semente: 41, dur: 165 },
-    { t: 7850, x:  -56, comp: 48, semente: 55, dur: 110 },
-    { t: 8030, x:  -56, comp: 48, semente: 55, dur:  70 }
+    { t:  520, de:   34, x: -102, comp: 62, semente:  3, dur: 150 },
+    { t:  730, de:   34, x: -102, comp: 62, semente:  3, dur:  95 },
+    { t: 1650, de: -118, x:   88, comp:  0, semente:  7, dur: 190, soDentro: true },
+    { t: 2450, de:  -74, x:   66, comp: 78, semente: 11, dur: 175 },
+    { t: 2690, de:  -74, x:   66, comp: 78, semente: 11, dur:  80 },
+    { t: 3600, de:  126, x:  -96, comp:  0, semente: 19, dur: 160, soDentro: true },
+    { t: 4250, de:   96, x:  -20, comp: 54, semente: 27, dur: 105 },
+    { t: 4410, de:   96, x:  -20, comp: 54, semente: 27, dur:  65 },
+    { t: 4560, de:   96, x:  -20, comp: 54, semente: 27, dur: 135 },
+    { t: 5500, de:  -20, x:  108, comp:  0, semente: 33, dur: 210, soDentro: true },
+    { t: 6350, de:  -60, x:  122, comp: 70, semente: 41, dur: 165 },
+    { t: 7850, de:   82, x:  -56, comp: 48, semente: 55, dur: 110 },
+    { t: 8030, de:   82, x:  -56, comp: 48, semente: 55, dur:  70 }
   ];
 
   const fract = n => { const s = Math.sin(n) * 43758.5453; return s - Math.floor(s); };
@@ -2566,6 +2573,22 @@ CI.views = (function () {
     if (d < 0 || d > p.dur) return 0;
     const f = d / p.dur;
     return f < 0.18 ? 1 : Math.pow(1 - (f - 0.18) / 0.82, 2.2);
+  }
+
+  /** Filamento que corre DENTRO da nuvem, de um ponto a outro, torto no meio. */
+  function filamento(semente, ax, ay, bx, by, s = 1) {
+    const pts = [[ax, ay]];
+    const n = 12;
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const k = semente * 23.7 + i * 4.1;
+      pts.push([
+        ax + (bx - ax) * t + (fract(k) - 0.5) * 26 * s,
+        ay + (by - ay) * t + (fract(k + 1.7) - 0.5) * 17 * s
+      ]);
+    }
+    pts.push([bx, by]);
+    return pts;
   }
 
   /** Traçado quebrado do raio, sempre igual para a mesma semente. */
@@ -2605,6 +2628,9 @@ CI.views = (function () {
       ar:     tok("--nuvem-ar", "rgba(94,155,224,.16)"),
       nucleo: tok("--raio-nucleo", "#F2F8FF"),
       halo:   tok("--raio-halo", "#7FC0FF"),
+      // dentro da nuvem o raio CLAREIA o vapor: no tema claro isso é branco,
+      // não o azul do núcleo, senão o filamento escureceria a nuvem
+      difuso: tok("--raio-difusao", "#CFE6FF"),
       nuvem:  tok("--nuvem", "#5E9BE0")
     };
 
@@ -2649,9 +2675,86 @@ CI.views = (function () {
       ctx.strokeStyle = comAlfa(C.nucleo, 0.98 * a); ctx.lineWidth = 1.7 * s; linha(pts);
     }
 
+    /* Dentro da nuvem o raio é visto através do vapor: o brilho espalha muito
+       e o fio fica mais fraco do que o do lado de fora. */
+    function desenharFilamento(pts, a, s = 1) {
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.strokeStyle = comAlfa(C.difuso, 0.12 * a);  ctx.lineWidth = 34 * s;  linha(pts);
+      ctx.strokeStyle = comAlfa(C.difuso, 0.22 * a);  ctx.lineWidth = 16 * s;  linha(pts);
+      ctx.strokeStyle = comAlfa(C.halo, 0.34 * a);    ctx.lineWidth = 6 * s;   linha(pts);
+      ctx.strokeStyle = comAlfa(C.nucleo, 0.58 * a);  ctx.lineWidth = 1.2 * s; linha(pts);
+    }
+
+    /* Por onde o filamento entra e sai, para o raio externo começar exatamente
+       onde o de dentro termina. */
+    function pernas(p, cx, cy, s, deriva) {
+      return {
+        ax: cx + p.de * s + deriva, ay: cy - 26 * s,
+        bx: cx + p.x * s + deriva,  by: cy + (p.soDentro ? 24 : 44) * s
+      };
+    }
+
+    /* Post-its minúsculos boiando em volta: são as ideias ainda soltas, sem
+       lugar. Cada um tem fase, amplitude e balanço próprios — parece aleatório,
+       mas é tudo função do tempo dentro do ciclo, então o laço fecha igual.
+       As cores são as das diretorias, já ajustadas ao tema. */
+    const CORES_IDEIA = (() => {
+      const ds = (db.dados.diretorias || []).map(d => U.corVisivel(d.cor)).filter(Boolean);
+      return ds.length >= 4
+        ? ds
+        : ["#F6C445", "#4ED6C0", "#FF8FA3", "#7C8CF8", "#C77DFF", "#5B9BFF"];
+    })();
+
+    const POSTITS = Array.from({ length: 14 }, (_, i) => {
+      const r = k => fract(i * 12.9898 + k * 78.233 + 4.7);
+      return {
+        bx: (r(1) - 0.5) * 2,
+        by: (r(2) - 0.5) * 2,
+        tam: 4.5 + r(3) * 4,
+        fase: r(4) * 6.2832,
+        fase2: r(5) * 6.2832,
+        ampX: 14 + r(6) * 26,
+        ampY: 10 + r(7) * 20,
+        // pouca inclinação: muito girado vira losango, e losango não é post-it
+        incl: (r(8) - 0.5) * 0.44,
+        bal: 0.08 + r(9) * 0.2,
+        frente: r(10) > 0.5,
+        alfa: 0.34 + r(11) * 0.38,
+        cor: CORES_IDEIA[Math.floor(r(12) * CORES_IDEIA.length) % CORES_IDEIA.length]
+      };
+    });
+
+    function postIt(p, i, th, s, cx, cy, brilho) {
+      const x = cx + (p.bx * 218 + Math.sin(th + p.fase) * p.ampX) * s;
+      const y = cy + (p.by * 96 + 10 + Math.sin(2 * th + p.fase2) * p.ampY) * s;
+      const ang = p.incl + Math.sin(th + p.fase2) * p.bal;
+      const lado = p.tam * s * (p.frente ? 1 : 0.8);
+      const m = lado / 2;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      ctx.fillStyle = "rgba(0,0,0,.26)";
+      ctx.fillRect(-m + 0.9 * s, -m + 1.2 * s, lado, lado);
+      ctx.fillStyle = comAlfa(p.cor, p.alfa);
+      ctx.fillRect(-m, -m, lado, lado);
+      // faixa de cola no topo: é o que faz ler como post-it, e não como confete
+      ctx.fillStyle = comAlfa("#FFFFFF", p.alfa * 0.4);
+      ctx.fillRect(-m, -m, lado, lado * 0.3);
+      // o relâmpago bate neles também
+      if (brilho > 0.02) {
+        ctx.fillStyle = comAlfa(C.nucleo, 0.3 * brilho * p.alfa);
+        ctx.fillRect(-m, -m, lado, lado);
+      }
+      ctx.restore();
+    }
+
     function desenharCena(t) {
       const { w, h, s, cx, cy } = G;
       ctx.clearRect(0, 0, w, h);
+
+      const th = (2 * Math.PI * t) / DUR_CEU;
+      const deriva = Math.sin(th) * 6 * s;
 
       /* o que está aceso agora */
       let brilho = 0, focoX = cx, focoY = cy + 52 * s;
@@ -2660,7 +2763,11 @@ CI.views = (function () {
         const a = forca(t, p);
         if (a <= 0.002) return;
         acesos.push({ p, a });
-        if (a > brilho) { brilho = a; focoX = cx + p.x * s; focoY = cy + 54 * s; }
+        if (a > brilho) {
+          brilho = a;
+          focoX = cx + ((p.de + p.x) / 2) * s + deriva;
+          focoY = cy + (p.soDentro ? 4 : 40) * s;
+        }
       });
 
       /* ar carregado em volta */
@@ -2671,12 +2778,15 @@ CI.views = (function () {
       ctx.fillRect(0, 0, w, h);
 
       if (brilho > 0.01) {
-        const g = ctx.createRadialGradient(focoX, focoY, 4, focoX, focoY, 170 * s);
+        const g = ctx.createRadialGradient(focoX, focoY, 4, focoX, focoY, 190 * s);
         g.addColorStop(0, comAlfa(C.halo, 0.30 * brilho));
         g.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
       }
+
+      /* os post-its que passam POR TRÁS da nuvem */
+      POSTITS.forEach((p, i) => { if (!p.frente) postIt(p, i, th, s, cx, cy, brilho); });
 
       /* halo macio da silhueta — é o que dispensa qualquer borda */
       ctx.save();
@@ -2700,9 +2810,6 @@ CI.views = (function () {
       ctx.fillStyle = corpo;
       ctx.fillRect(0, 0, w, h);
 
-      const th = (2 * Math.PI * t) / DUR_CEU;
-      const deriva = Math.sin(th) * 6 * s;
-
       /* topos iluminados */
       [[-64, -40, 34], [-14, -50, 40], [36, -39, 34], [80, -22, 26]].forEach(([dx, dy, rr], k) => {
         const x = cx + dx * s + deriva;
@@ -2715,22 +2822,39 @@ CI.views = (function () {
         ctx.fillRect(x - r, y - r, r * 2, r * 2);
       });
 
-      /* a barriga acende por dentro quando o raio nasce */
+      /* a barriga acende por dentro quando a descarga nasce */
       if (brilho > 0.01) {
-        const g = ctx.createRadialGradient(focoX, focoY - 16 * s, 2, focoX, focoY - 16 * s, 110 * s);
-        g.addColorStop(0, comAlfa(C.nucleo, 0.55 * brilho));
-        g.addColorStop(0.4, comAlfa(C.halo, 0.30 * brilho));
+        const g = ctx.createRadialGradient(focoX, focoY - 16 * s, 2, focoX, focoY - 16 * s, 130 * s);
+        g.addColorStop(0, comAlfa(C.nucleo, 0.5 * brilho));
+        g.addColorStop(0.4, comAlfa(C.halo, 0.28 * brilho));
         g.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
       }
+
+      /* O RAIO POR DENTRO — ainda dentro do recorte, então ele corre pela nuvem
+         e some ao encostar na silhueta, como se estivesse mesmo lá dentro. */
+      acesos.forEach(({ p, a }) => {
+        const { ax, ay, bx, by } = pernas(p, cx, cy, s, deriva);
+        const pts = filamento(p.semente, ax, ay, bx, by, s);
+        desenharFilamento(pts, a, s);
+        // ramos curtos saindo do caminho principal
+        [2, 5].forEach((k, j) => {
+          const o = pts[k];
+          desenharFilamento([
+            o,
+            [o[0] + (fract(p.semente + k) - 0.5) * 52 * s, o[1] + (j ? 22 : -20) * s],
+            [o[0] + (fract(p.semente + k + 3) - 0.5) * 78 * s, o[1] + (j ? 38 : -32) * s]
+          ], a * 0.55, s);
+        });
+      });
       ctx.restore();
 
-      /* os raios */
+      /* o que sai por baixo, começando onde o filamento terminou */
       acesos.forEach(({ p, a }) => {
-        const x0 = cx + p.x * s + deriva;
-        const y0 = cy + 46 * s;
-        const pts = tracado(p.semente, x0, y0, p.comp * s, s);
+        if (p.soDentro || !p.comp) return;
+        const { bx, by } = pernas(p, cx, cy, s, deriva);
+        const pts = tracado(p.semente, bx, by, p.comp * s, s);
         desenharRaio(pts, a, s);
         // uma bifurcação curta, para não parecer um traço só
         const b = pts[2];
@@ -2740,6 +2864,9 @@ CI.views = (function () {
           [b[0] - (20 + fract(p.semente + 1) * 12) * s, b[1] + 30 * s]
         ], a * 0.7, s);
       });
+
+      /* os post-its que passam NA FRENTE */
+      POSTITS.forEach((p, i) => { if (p.frente) postIt(p, i, th, s, cx, cy, brilho); });
     }
 
     function ajustar() {
