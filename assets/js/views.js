@@ -2463,8 +2463,745 @@ CI.views = (function () {
     );
   }
 
+  /* =========================================================================
+     BRAINSTORM — o banco de ideias aberto à empresa
+     A empresa inteira propõe e apoia no mural. O funil (atração, qualificação,
+     fechamento) fica atrás de uma senha, porque é decisão da inovação.
+     ====================================================================== */
+
+  const SENHA_FUNIL = "5296";
+  const TIPOS_IDEIA = ["Projeto Interno", "Ferramenta", "Processo", "Iniciativa", "Outro"];
+  const ETAPAS_FUNIL = [
+    { id: "atracao",      nome: "Atração",      desc: "tudo que chegou e está no ar",
+      tom: "var(--nuvem)", lavagem: "var(--nuvem-wash)" },
+    { id: "qualificacao", nome: "Qualificação", desc: "vale a pena? quem toca? quanto custa?",
+      tom: "var(--warn)",  lavagem: "var(--warn-wash)" },
+    { id: "fechamento",   nome: "Fechamento",   desc: "aprovada — daqui vira projeto",
+      tom: "var(--ok)",    lavagem: "var(--ok-wash)" }
+  ];
+  const ETAPA = id => ETAPAS_FUNIL.find(e => e.id === id) || ETAPAS_FUNIL[0];
+
+  let bsFiltro = "Todos";
+  let bsOrdem = "recentes";
+  let bsArquivadas = false;
+
+  const ideiasVivas = () => db.dados.ideias.filter(i => !i.arquivada);
+  const ideiasDaEtapa = id => ideiasVivas()
+    .filter(i => (i.etapa || "atracao") === id)
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) ||
+                    String(b.criado_em).localeCompare(String(a.criado_em)));
+
+  /** Identidade de quem apoia. Com Supabase é o e-mail; sem ele, um id do navegador. */
+  function quemSou() {
+    const e = String(db.usuario?.email || db.perfil?.email || "").trim().toLowerCase();
+    if (e) return e;
+    try {
+      let a = localStorage.getItem("ci:anon");
+      if (!a) { a = "anon-" + Math.random().toString(36).slice(2, 10); localStorage.setItem("ci:anon", a); }
+      return a;
+    } catch (_) { return "anon"; }
+  }
+
+  const apoios = i => (Array.isArray(i.apoios) ? i.apoios : []);
+  const apoiei = i => apoios(i).includes(quemSou());
+
+  async function alternarApoio(i) {
+    const eu = quemSou();
+    const lista = apoios(i).slice();
+    const j = lista.indexOf(eu);
+    if (j >= 0) lista.splice(j, 1); else lista.push(eu);
+    try { await db.atualizar("ideias", i.id, { apoios: lista }); }
+    catch (err) { U.aviso("Não deu para registrar: " + err.message, "erro"); }
+  }
+
+  function funilAberto() {
+    try { return localStorage.getItem("ci:funil") === "1"; } catch (_) { return false; }
+  }
+  function guardarFunil(aberto) {
+    try { aberto ? localStorage.setItem("ci:funil", "1") : localStorage.removeItem("ci:funil"); } catch (_) {}
+  }
+
+  /* ---- a nuvem carregada ---------------------------------------------------
+     Canvas sem moldura no topo da página. A nuvem respira, o ar em volta
+     brilha e, em tempos marcados, um raio pisca — sempre mais de uma vez,
+     porque raio de verdade tremeluz. Tudo é função do tempo dentro de um
+     ciclo de 9 s, e todo termo periódico tem período que divide o ciclo:
+     o laço fecha sem emenda.
+     ---------------------------------------------------------------------- */
+
+  const DUR_CEU = 9000;
+
+  const PUFFS = [
+    { x: -134, y:  18, r: 26, f: 1.7 },
+    { x: -102, y:  -2, r: 35, f: 2.3 },
+    { x:  -64, y: -20, r: 44, f: 1.1 },
+    { x:  -14, y: -30, r: 51, f: 2.9 },
+    { x:   36, y: -19, r: 44, f: 1.5 },
+    { x:   80, y:  -3, r: 35, f: 2.1 },
+    { x:  116, y:  16, r: 26, f: 2.7 },
+    { x:  -90, y:  26, r: 29, f: 1.3 },
+    { x:  -34, y:  31, r: 35, f: 2.5 },
+    { x:   22, y:  31, r: 33, f: 1.9 },
+    { x:   76, y:  27, r: 27, f: 3.1 }
+  ];
+
+  const PISCADAS = [
+    { t:  520, x: -102, comp: 62, semente:  3, dur: 150 },
+    { t:  730, x: -102, comp: 62, semente:  3, dur:  95 },
+    { t: 2450, x:   66, comp: 78, semente: 11, dur: 175 },
+    { t: 2690, x:   66, comp: 78, semente: 11, dur:  80 },
+    { t: 4250, x:  -20, comp: 54, semente: 27, dur: 105 },
+    { t: 4410, x:  -20, comp: 54, semente: 27, dur:  65 },
+    { t: 4560, x:  -20, comp: 54, semente: 27, dur: 135 },
+    { t: 6350, x:  122, comp: 70, semente: 41, dur: 165 },
+    { t: 7850, x:  -56, comp: 48, semente: 55, dur: 110 },
+    { t: 8030, x:  -56, comp: 48, semente: 55, dur:  70 }
+  ];
+
+  const fract = n => { const s = Math.sin(n) * 43758.5453; return s - Math.floor(s); };
+
+  /** Envelope de uma piscada: acende seco, apaga em curva. */
+  function forca(t, p) {
+    const d = t - p.t;
+    if (d < 0 || d > p.dur) return 0;
+    const f = d / p.dur;
+    return f < 0.18 ? 1 : Math.pow(1 - (f - 0.18) / 0.82, 2.2);
+  }
+
+  /** Traçado quebrado do raio, sempre igual para a mesma semente. */
+  function tracado(semente, x0, y0, comp, s = 1) {
+    const pts = [[x0, y0]];
+    let x = x0;
+    for (let i = 1; i <= 5; i++) {
+      const k = semente * 17.3 + i * 5.7;
+      x += ((fract(k) - 0.5) * 26 + (fract(k + 2.1) - 0.5) * 10) * s;
+      pts.push([x, y0 + (comp * i) / 5]);
+    }
+    return pts;
+  }
+
+  let ceuNo = null;      // nó único: sobrevive ao redesenho da tela
+
+  function ceuCarregado() {
+    // O nó é reaproveitado para a animação não recomeçar a cada apoio dado.
+    // Só se refaz quando o tema muda, porque as cores vêm dos tokens.
+    const tema = U.temaEscuro() ? "escuro" : "claro";
+    if (ceuNo && ceuNo.__vivo && ceuNo.__tema === tema) return ceuNo;
+    if (ceuNo) ceuNo.__vivo = false;
+
+    const cv = h("canvas", {
+      role: "img",
+      "aria-label": "Animação: uma nuvem carregada respirando devagar, com raios " +
+                    "piscando por baixo dela — as ideias antes de virarem projeto.",
+      estilo: { display: "block", width: "100%" }
+    });
+    const ctx = cv.getContext("2d");
+
+    const raiz = getComputedStyle(document.documentElement);
+    const tok = (n, alt) => (raiz.getPropertyValue(n).trim() || alt);
+    const C = {
+      topo:   tok("--nuvem-topo", "#5F81AE"),
+      base:   tok("--nuvem-base", "#1A2942"),
+      ar:     tok("--nuvem-ar", "rgba(94,155,224,.16)"),
+      nucleo: tok("--raio-nucleo", "#F2F8FF"),
+      halo:   tok("--raio-halo", "#7FC0FF"),
+      nuvem:  tok("--nuvem", "#5E9BE0")
+    };
+
+    /* Geometria em pixels de CSS, recalculada a cada quadro: a nuvem mantém um
+       tamanho próprio em vez de esticar junto com a largura da tela. Em telas
+       largas ela fica à direita, com o texto à esquerda; em telas estreitas vai
+       para o meio e o texto desce para baixo dela. */
+    let G = { w: 560, h: 300, s: 1, cx: 280, cy: 120 };
+
+    function medir() {
+      const w = Math.max(280, Math.round(cv.clientWidth || 560));
+      const largo = w >= 860;
+      const s = Math.min(1.45, Math.max(0.82, w / 1000));
+      return { w, h: largo ? 300 : 240, s, cx: largo ? w * 0.66 : w * 0.5, cy: 30 + 81 * s };
+    }
+
+    function caminhoNuvem(t) {
+      const th = (2 * Math.PI * t) / DUR_CEU;
+      const deriva = Math.sin(th) * 6 * G.s;
+      ctx.beginPath();
+      PUFFS.forEach(p => {
+        const x = G.cx + (p.x + Math.sin(th + p.f) * 3.4) * G.s + deriva;
+        const y = G.cy + (p.y + Math.sin(th + p.f * 1.3) * 2.2) * G.s;
+        const r = p.r * G.s * (1 + Math.sin(2 * th + p.f) * 0.032);
+        ctx.moveTo(x + r, y);
+        ctx.arc(x, y, r, 0, 7);
+      });
+      return deriva;
+    }
+
+    function linha(pts) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    }
+
+    function desenharRaio(pts, a, s = 1) {
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.strokeStyle = comAlfa(C.halo, 0.24 * a);   ctx.lineWidth = 11 * s;  linha(pts);
+      ctx.strokeStyle = comAlfa(C.halo, 0.70 * a);   ctx.lineWidth = 4.2 * s; linha(pts);
+      ctx.strokeStyle = comAlfa(C.nucleo, 0.98 * a); ctx.lineWidth = 1.7 * s; linha(pts);
+    }
+
+    function desenharCena(t) {
+      const { w, h, s, cx, cy } = G;
+      ctx.clearRect(0, 0, w, h);
+
+      /* o que está aceso agora */
+      let brilho = 0, focoX = cx, focoY = cy + 52 * s;
+      const acesos = [];
+      PISCADAS.forEach(p => {
+        const a = forca(t, p);
+        if (a <= 0.002) return;
+        acesos.push({ p, a });
+        if (a > brilho) { brilho = a; focoX = cx + p.x * s; focoY = cy + 54 * s; }
+      });
+
+      /* ar carregado em volta */
+      const ar = ctx.createRadialGradient(cx, cy + 10 * s, 10, cx, cy + 10 * s, 260 * s);
+      ar.addColorStop(0, C.ar);
+      ar.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = ar;
+      ctx.fillRect(0, 0, w, h);
+
+      if (brilho > 0.01) {
+        const g = ctx.createRadialGradient(focoX, focoY, 4, focoX, focoY, 170 * s);
+        g.addColorStop(0, comAlfa(C.halo, 0.30 * brilho));
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      /* halo macio da silhueta — é o que dispensa qualquer borda */
+      ctx.save();
+      ctx.shadowColor = comAlfa(C.base, 0.5);
+      ctx.shadowBlur = 24 * s;
+      ctx.shadowOffsetY = 7 * s;
+      ctx.fillStyle = comAlfa(C.base, 0.92);
+      caminhoNuvem(t);
+      ctx.fill();
+      ctx.restore();
+
+      /* corpo: claro em cima, pesado na barriga */
+      ctx.save();
+      caminhoNuvem(t);
+      ctx.clip();
+
+      const corpo = ctx.createLinearGradient(0, cy - 66 * s, 0, cy + 62 * s);
+      corpo.addColorStop(0, C.topo);
+      corpo.addColorStop(0.46, comAlfa(C.base, 0.86));
+      corpo.addColorStop(1, C.base);
+      ctx.fillStyle = corpo;
+      ctx.fillRect(0, 0, w, h);
+
+      const th = (2 * Math.PI * t) / DUR_CEU;
+      const deriva = Math.sin(th) * 6 * s;
+
+      /* topos iluminados */
+      [[-64, -40, 34], [-14, -50, 40], [36, -39, 34], [80, -22, 26]].forEach(([dx, dy, rr], k) => {
+        const x = cx + dx * s + deriva;
+        const y = cy + (dy + Math.sin(th + k) * 2) * s;
+        const r = rr * s;
+        const g = ctx.createRadialGradient(x, y, 1, x, y, r);
+        g.addColorStop(0, comAlfa(C.topo, 0.5));
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      });
+
+      /* a barriga acende por dentro quando o raio nasce */
+      if (brilho > 0.01) {
+        const g = ctx.createRadialGradient(focoX, focoY - 16 * s, 2, focoX, focoY - 16 * s, 110 * s);
+        g.addColorStop(0, comAlfa(C.nucleo, 0.55 * brilho));
+        g.addColorStop(0.4, comAlfa(C.halo, 0.30 * brilho));
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+      ctx.restore();
+
+      /* os raios */
+      acesos.forEach(({ p, a }) => {
+        const x0 = cx + p.x * s + deriva;
+        const y0 = cy + 46 * s;
+        const pts = tracado(p.semente, x0, y0, p.comp * s, s);
+        desenharRaio(pts, a, s);
+        // uma bifurcação curta, para não parecer um traço só
+        const b = pts[2];
+        desenharRaio([
+          b,
+          [b[0] - (13 + fract(p.semente) * 9) * s, b[1] + 15 * s],
+          [b[0] - (20 + fract(p.semente + 1) * 12) * s, b[1] + 30 * s]
+        ], a * 0.7, s);
+      });
+    }
+
+    function ajustar() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const g = medir();
+      const mudou = g.w !== G.w || g.h !== G.h;
+      G = g;
+      const alvoW = Math.round(g.w * dpr), alvoH = Math.round(g.h * dpr);
+      if (cv.width !== alvoW || cv.height !== alvoH) {
+        cv.width = alvoW; cv.height = alvoH;
+        cv.style.height = g.h + "px";
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return mudou;
+    }
+
+    /* Com "reduzir movimento" no sistema a cena abre parada, e o botão fica em
+       destaque. A escolha é a mesma da página inicial: quem já deu play, já deu. */
+    const pedeQuieto = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let escolha = null;
+    try { escolha = localStorage.getItem("ci:animacao"); } catch (_) {}
+    let rodando = escolha ? escolha === "rodando" : !pedeQuieto;
+
+    const botao = h("button.palco-play", { type: "button" });
+    function pintarBotao() {
+      U.limpar(botao);
+      botao.appendChild(ic(rodando ? "pausa" : "tocar"));
+      botao.appendChild(h("span", rodando ? "Pausar" : "Reproduzir"));
+      botao.setAttribute("aria-label", rodando ? "Pausar a animação" : "Reproduzir a animação");
+      botao.classList.toggle("destaque", !rodando);
+    }
+    botao.addEventListener("click", () => {
+      rodando = !rodando;
+      try { localStorage.setItem("ci:animacao", rodando ? "rodando" : "parado"); } catch (_) {}
+      pintarBotao();
+    });
+    pintarBotao();
+
+    const no = h("div.ceu",
+      cv, botao,
+      h("div.ceu-titulo",
+        h("h1", "Brainstorm"),
+        h("p", "O que você faria diferente na Adecon? Projeto, ferramenta, processo, " +
+               "qualquer coisa. Escreve embaixo — ideia guardada na cabeça não vira nada.")
+      )
+    );
+    no.__vivo = true;
+    no.__tema = tema;
+
+    let tCena = 0, anterior = performance.now(), ausente = 0, precisaPintar = true;
+
+    function quadro(agora) {
+      if (!no.__vivo) return;               // trocou o tema: este laço acabou
+      if (!cv.isConnected) {
+        // a tela foi trocada: espera um pouco antes de desistir do laço
+        if (++ausente > 420) { no.__vivo = false; return; }
+        anterior = agora;
+        return requestAnimationFrame(quadro);
+      }
+      ausente = 0;
+
+      /* fade pela rolagem: some conforme a página sobe, sem depender de evento */
+      const rolador = cv.closest(".conteudo");
+      let visivel = 1;
+      if (rolador) {
+        const alt = no.offsetHeight || 240;
+        const p = Math.min(1, Math.max(0, rolador.scrollTop / (alt * 0.8)));
+        visivel = 1 - p;
+        no.style.setProperty("--fade", visivel.toFixed(3));
+        no.style.setProperty("--desloc", (rolador.scrollTop * 0.18).toFixed(1) + "px");
+      }
+
+      const dt = Math.min(agora - anterior, 50);
+      anterior = agora;
+      const redimensionou = ajustar();
+      const anda = rodando && visivel > 0.02;
+      if (anda) { tCena = (tCena + dt) % DUR_CEU; precisaPintar = true; }
+      if (precisaPintar || redimensionou) {
+        desenharCena(tCena);
+        precisaPintar = anda;
+      }
+      requestAnimationFrame(quadro);
+    }
+    requestAnimationFrame(quadro);
+
+    cv.__cena = desenharCena;
+    ceuNo = no;
+    return no;
+  }
+
+  /* ---- mural --------------------------------------------------------------- */
+
+  function botaoRaio(i) {
+    const n = apoios(i).length;
+    const meu = apoiei(i);
+    const b = h("button.bs-raio", {
+      type: "button",
+      "aria-pressed": meu ? "true" : "false",
+      title: meu ? "Tirar seu apoio" : "Apoiar esta ideia",
+      onclick: () => alternarApoio(i)
+    }, ic("raio"), h("span", String(n)));
+    return b;
+  }
+
+  function cartaoIdeia(i, destravado) {
+    const tom = i.diretoria_id ? corDiretoria(i.diretoria_id) : "var(--nuvem)";
+    const et = ETAPA(i.etapa);
+    return h("article.bs-cartao", { estilo: { "--tom": tom } },
+      h("div.bs-topo",
+        chip(i.tipo || "Outro", null, tom),
+        destravado ? h("span.bs-selo-etapa", { estilo: { "--tom": et.tom } }, et.nome) : null,
+        botaoRaio(i)
+      ),
+      h("h3", i.titulo),
+      i.descricao ? h("p.corpo", i.descricao) : null,
+      h("div.rodape",
+        h("span.autoria",
+          (i.autor || "anônimo") +
+          (i.diretoria_id ? " · " + (db.diretoria(i.diretoria_id)?.sigla || "") : "") +
+          " · " + U.relativo(i.criado_em))
+      )
+    );
+  }
+
+  function painelEnvio() {
+    const fTitulo = entrada({
+      class: "bs-titulo", placeholder: "Em uma frase: qual é a ideia?", maxlength: 160,
+      onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); enviar(); } }
+    });
+    const fDesc = area({ rows: 3, placeholder: "Opcional: como funcionaria, que problema resolve, por onde começar." });
+    const fTipo = selecao(TIPOS_IDEIA, { value: "Iniciativa" });
+    const fDir = selecao([["", "Não sei ainda"], ...db.dados.diretorias.map(d => [d.id, d.nome])], { value: "" });
+    const fAutor = entrada({ value: db.perfil?.nome && db.perfil.nome !== "Você" ? db.perfil.nome : "", placeholder: "Seu nome" });
+
+    async function enviar() {
+      const titulo = fTitulo.value.trim();
+      if (!titulo) { U.aviso("Escreva a ideia primeiro.", "alerta"); fTitulo.focus(); return; }
+      const autor = fAutor.value.trim();
+      try {
+        await db.criar("ideias", {
+          titulo,
+          descricao: fDesc.value.trim() || null,
+          tipo: fTipo.value,
+          diretoria_id: fDir.value || null,
+          autor: autor || null,
+          email: String(db.usuario?.email || db.perfil?.email || "").trim() || null,
+          etapa: "atracao",
+          ordem: ideiasDaEtapa("atracao").length,
+          apoios: [],
+          arquivada: false
+        });
+        if (autor) db.salvarPerfil({ nome: autor });
+        fTitulo.value = ""; fDesc.value = "";
+        U.aviso("Ideia no ar", "ok", "raio");
+        fTitulo.focus();
+      } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
+    }
+
+    return h("section.painel",
+      h("div.painel-hd",
+        h("h2", "Solte sua ideia"),
+        h("div.acoes", chip(`${ideiasVivas().length} no mural`))
+      ),
+      h("div.painel-bd",
+        h("div.bs-envio",
+          fTitulo,
+          fDesc,
+          h("div.linha-campos",
+            campo("Isto é", fTipo),
+            campo("Diretoria", fDir),
+            campo("Seu nome", fAutor)
+          ),
+          h("div.bs-envio-pe",
+            h("span.dica", "Não precisa estar pronta. Toda ideia entra em Atração e a " +
+                           "equipe de inovação cuida do resto."),
+            h("button.btn.btn-primario", { type: "button", onclick: enviar }, ic("tempestade"), "Publicar ideia")
+          )
+        )
+      )
+    );
+  }
+
+  function painelMural(destravado) {
+    const todas = ideiasVivas();
+    const tipos = ["Todos", ...TIPOS_IDEIA.filter(t => todas.some(i => i.tipo === t))];
+    if (!tipos.includes(bsFiltro)) bsFiltro = "Todos";
+
+    let lista = bsFiltro === "Todos" ? todas.slice() : todas.filter(i => i.tipo === bsFiltro);
+    lista.sort(bsOrdem === "apoios"
+      ? (a, b) => apoios(b).length - apoios(a).length || String(b.criado_em).localeCompare(String(a.criado_em))
+      : (a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
+
+    const filtros = tipos.map(t => h("button.bs-filtro", {
+      type: "button", "aria-pressed": bsFiltro === t ? "true" : "false",
+      onclick: () => { bsFiltro = t; CI.app.recarregarVista(); }
+    }, t));
+
+    const ordenar = h("button.bs-filtro", {
+      type: "button",
+      onclick: () => { bsOrdem = bsOrdem === "apoios" ? "recentes" : "apoios"; CI.app.recarregarVista(); }
+    }, ic(bsOrdem === "apoios" ? "raio" : "relogio"),
+       bsOrdem === "apoios" ? "Mais apoiadas" : "Mais recentes");
+
+    return h("section.painel",
+      h("div.painel-hd",
+        h("h2", "No ar"),
+        h("div.acoes", ordenar)
+      ),
+      h("div.painel-bd",
+        h("div.bs-filtros", { estilo: { marginBottom: "13px" } }, ...filtros),
+        lista.length
+          ? h("div.bs-mural", ...lista.map(i => cartaoIdeia(i, destravado)))
+          : U.vazio("tempestade", "O mural está limpo",
+              "A primeira ideia da empresa começa no campo aí em cima.")
+      )
+    );
+  }
+
+  /* ---- funil --------------------------------------------------------------- */
+
+  async function gravarFunil(grade) {
+    const mudancas = [];
+    grade.querySelectorAll(".funil-faixa").forEach(faixa => {
+      const etapa = faixa.dataset.etapa;
+      [...faixa.querySelectorAll(".funil-cartao")].forEach((el, n) => {
+        mudancas.push({ id: el.dataset.id, etapa, ordem: n });
+      });
+    });
+    try {
+      const n = await db.moverIdeias(mudancas);
+      if (n) U.aviso("Funil atualizado", "ok");
+    } catch (err) {
+      U.aviso("Não deu para salvar: " + err.message, "erro");
+    }
+    CI.app.recarregarVista();
+  }
+
+  function ligarFunil(grade) {
+    let cartao = null, rolador = null;
+
+    const faixas = () => [...grade.querySelectorAll(".funil-faixa")];
+
+    grade.addEventListener("pointerdown", ev => {
+      const alca = ev.target.closest(".funil-puxador");
+      if (!alca || ev.button !== 0) return;
+      cartao = alca.closest(".funil-cartao");
+      if (!cartao) return;
+      rolador = grade.closest(".conteudo");
+      cartao.classList.add("movendo");
+      grade.classList.add("reordenando");
+      cartao.style.pointerEvents = "none";   // libera elementFromPoint
+      alca.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+
+    grade.addEventListener("pointermove", ev => {
+      if (!cartao) return;
+      ev.preventDefault();
+
+      const sob = document.elementFromPoint(ev.clientX, ev.clientY);
+      const faixa = sob && sob.closest(".funil-faixa");
+      if (faixa) {
+        faixas().forEach(f => f.classList.toggle("alvo", f === faixa));
+        const lista = faixa.querySelector(".funil-lista");
+        const alvo = sob.closest(".funil-cartao");
+        if (alvo && alvo !== cartao && alvo.parentElement === lista) {
+          const meio = alvo.getBoundingClientRect().top + alvo.offsetHeight / 2;
+          lista.insertBefore(cartao, ev.clientY < meio ? alvo : alvo.nextSibling);
+        } else if (!alvo && cartao.parentElement !== lista) {
+          lista.appendChild(cartao);
+        }
+      }
+
+      if (rolador) {
+        const r = rolador.getBoundingClientRect();
+        if (ev.clientY < r.top + 70) rolador.scrollTop -= 14;
+        else if (ev.clientY > r.bottom - 70) rolador.scrollTop += 14;
+      }
+    });
+
+    const soltar = () => {
+      if (!cartao) return;
+      cartao.style.pointerEvents = "";
+      cartao.classList.remove("movendo");
+      grade.classList.remove("reordenando");
+      faixas().forEach(f => f.classList.remove("alvo"));
+      cartao = null;
+      gravarFunil(grade);
+    };
+
+    grade.addEventListener("pointerup", soltar);
+    grade.addEventListener("pointercancel", soltar);
+  }
+
+  async function moverIdeiaEtapa(i, passo) {
+    const idx = ETAPAS_FUNIL.findIndex(e => e.id === (i.etapa || "atracao"));
+    const alvo = ETAPAS_FUNIL[idx + passo];
+    if (!alvo) return;
+    try {
+      await db.moverIdeias([{ id: i.id, etapa: alvo.id, ordem: ideiasDaEtapa(alvo.id).length }]);
+      U.aviso(`“${i.titulo.slice(0, 28)}${i.titulo.length > 28 ? "…" : ""}” → ${alvo.nome}`, "ok");
+    } catch (err) { U.aviso(err.message, "erro"); }
+  }
+
+  function cartaoFunil(i, idx) {
+    const tom = i.diretoria_id ? corDiretoria(i.diretoria_id) : "var(--nuvem)";
+    const nApoios = apoios(i).length;
+
+    return h("article.funil-cartao", { dataset: { id: i.id }, estilo: { "--tom": tom } },
+      h("div", { estilo: { display: "flex", alignItems: "flex-start", gap: "6px" } },
+        h("span.nome", { estilo: { flex: "1 1 auto", minWidth: 0 } }, i.titulo),
+        h("button.funil-puxador", {
+          type: "button", "aria-label": "Arrastar para outra etapa", title: "Arraste para mover",
+          onkeydown: e => {
+            if (e.key === "ArrowRight") { e.preventDefault(); moverIdeiaEtapa(i, 1); }
+            if (e.key === "ArrowLeft") { e.preventDefault(); moverIdeiaEtapa(i, -1); }
+          }
+        }, ic("arrastar"))
+      ),
+      h("div.acoes",
+        h("span.meta",
+          (i.autor || "anônimo") + (nApoios ? ` · ${nApoios} ${nApoios === 1 ? "raio" : "raios"}` : "")),
+        h("span.botoes",
+          h("button.btn.btn-fantasma.btn-icone.btn-p", {
+            type: "button", "aria-label": "Voltar uma etapa", title: "Voltar uma etapa",
+            disabled: idx === 0, onclick: () => moverIdeiaEtapa(i, -1)
+          }, ic("setaEsq")),
+          h("button.btn.btn-fantasma.btn-icone.btn-p", {
+            type: "button", "aria-label": "Avançar uma etapa", title: "Avançar uma etapa",
+            disabled: idx === ETAPAS_FUNIL.length - 1, onclick: () => moverIdeiaEtapa(i, 1)
+          }, ic("setaDir")),
+          idx === ETAPAS_FUNIL.length - 1
+            ? h("button.btn.btn-p", {
+                type: "button", title: "Abrir o formulário de projeto já preenchido",
+                onclick: () => modalProjeto(null, {
+                  nome: i.titulo,
+                  objetivo: i.descricao || "",
+                  diretoria_id: i.diretoria_id || db.dados.diretorias[0]?.id || null,
+                  tipo: TIPOS.includes(i.tipo) ? i.tipo : "Projeto Interno"
+                })
+              }, ic("mais"), "Virar projeto")
+            : null,
+          h("button.btn.btn-fantasma.btn-icone.btn-p", {
+            type: "button", "aria-label": "Arquivar", title: "Arquivar (sai do mural, não se perde)",
+            onclick: async () => {
+              try {
+                await db.atualizar("ideias", i.id, { arquivada: true });
+                U.aviso("Arquivada", "info");
+              } catch (err) { U.aviso(err.message, "erro"); }
+            }
+          }, ic("caixa"))
+        )
+      )
+    );
+  }
+
+  function painelFunil() {
+    if (!funilAberto()) {
+      const fSenha = entrada({
+        type: "password", inputmode: "numeric", maxlength: 8, autocomplete: "off",
+        "aria-label": "Senha do funil",
+        onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); tentar(); } }
+      });
+      function tentar() {
+        if (fSenha.value.trim() !== SENHA_FUNIL) {
+          U.aviso("Senha incorreta.", "erro");
+          fSenha.value = ""; fSenha.focus();
+          return;
+        }
+        guardarFunil(true);
+        U.aviso("Funil destravado neste navegador", "ok");
+        CI.app.recarregarVista();
+      }
+      return h("section.painel",
+        h("div.painel-hd", h("h2", "Funil de ideias"), h("div.acoes", chip("restrito"))),
+        h("div.painel-bd",
+          h("div.bs-tranca",
+            ic("cadeado"),
+            h("h3", "O funil é da equipe de inovação"),
+            h("p", "Aqui as ideias passam por atração, qualificação e fechamento. " +
+                   "Quem publica no mural não precisa ver esta parte — e ela fica destravada " +
+                   "neste navegador depois da primeira vez."),
+            h("div.bs-tranca-form",
+              fSenha,
+              h("button.btn.btn-primario", { type: "button", onclick: tentar }, ic("destravar"), "Destravar")
+            )
+          )
+        )
+      );
+    }
+
+    const total = ideiasVivas().length;
+    const arquivadas = db.dados.ideias.filter(i => i.arquivada);
+
+    const grade = h("div.funil", ...ETAPAS_FUNIL.map((et, idx) => {
+      const daEtapa = ideiasDaEtapa(et.id);
+      return h("div.funil-faixa", {
+        dataset: { etapa: et.id },
+        estilo: { "--tom": et.tom, "--lavagem": et.lavagem }
+      },
+        h("div.funil-parede"),
+        h("div.funil-miolo"),
+        h("div.funil-hd",
+          h("span.rotulo", et.nome),
+          h("span.cont", `${daEtapa.length} ${daEtapa.length === 1 ? "ideia" : "ideias"}`),
+          h("span.desc", et.desc)
+        ),
+        h("div.funil-lista", ...daEtapa.map(i => cartaoFunil(i, idx)))
+      );
+    }));
+    ligarFunil(grade);
+
+    const fecham = ideiasDaEtapa("fechamento").length;
+    const conv = total ? Math.round((fecham / total) * 100) : 0;
+
+    return h("section.painel",
+      h("div.painel-hd",
+        h("h2", "Funil de ideias"),
+        h("div.acoes",
+          chip(`${conv}% chegaram ao fechamento`, conv >= 30 ? "ok" : null),
+          arquivadas.length
+            ? h("button.btn.btn-fantasma.btn-p", {
+                type: "button",
+                onclick: () => { bsArquivadas = !bsArquivadas; CI.app.recarregarVista(); }
+              }, ic("caixa"), `${arquivadas.length} arquivada${arquivadas.length > 1 ? "s" : ""}`)
+            : null,
+          h("button.btn.btn-fantasma.btn-p", {
+            type: "button", title: "Esconder o funil neste navegador",
+            onclick: () => { guardarFunil(false); U.aviso("Funil trancado", "info"); CI.app.recarregarVista(); }
+          }, ic("cadeado"), "Trancar")
+        )
+      ),
+      h("div.painel-bd.sem-pad", grade),
+      bsArquivadas && arquivadas.length
+        ? h("div.painel-bd", { estilo: { borderTop: "1px solid var(--line-soft)" } },
+            h("div.rotulo", { estilo: { marginBottom: "9px" } }, "arquivadas"),
+            h("div.bs-filtros", ...arquivadas.map(i => h("button.bs-filtro", {
+              type: "button", title: "Devolver ao funil, em Atração",
+              onclick: async () => {
+                try {
+                  await db.atualizar("ideias", i.id, { arquivada: false, etapa: "atracao" });
+                  U.aviso("De volta ao mural", "ok");
+                } catch (err) { U.aviso(err.message, "erro"); }
+              }
+            }, ic("recarregar"), i.titulo.slice(0, 40)))))
+        : null
+    );
+  }
+
+  function vBrainstorm() {
+    const destravado = funilAberto();
+    return h("div.view.view-brainstorm",
+      ceuCarregado(),
+      painelEnvio(),
+      painelMural(destravado),
+      painelFunil()
+    );
+  }
+
   return {
-    vInicio, vPainel, vCronograma, vProjetos, vProjeto, vDiretorias, vImplementacao, vIndicadores, vConfig,
+    vInicio, vPainel, vCronograma, vProjetos, vProjeto, vDiretorias, vImplementacao,
+    vIndicadores, vConfig, vBrainstorm,
     modalProjeto, modalEtapa, gavetaEtapa, buscaGlobal
   };
 })();
