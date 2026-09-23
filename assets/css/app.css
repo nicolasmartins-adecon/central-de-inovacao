@@ -321,9 +321,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .conexao[data-estado="online"] .led { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-wash); }
 .conexao[data-estado="erro"] .led { background: var(--crit); box-shadow: 0 0 0 3px var(--crit-wash); }
-.conexao-txt { min-width: 0; line-height: 1.25; }
-.conexao-t { font: 600 11.5px/1.3 var(--f-ui); color: var(--txt); }
-.conexao-s { font: 400 10px/1.3 var(--f-dado); color: var(--muted); }
+.conexao-txt { flex: 1 1 auto; min-width: 0; line-height: 1.25; overflow: hidden; }
+.conexao-t {
+  font: 600 11.5px/1.3 var(--f-ui); color: var(--txt);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* O e-mail encolhe sozinho até caber na largura do trilho (o JS grava --fs);
+   se ainda assim estourar, o fim vira reticências e o título mostra inteiro. */
+.conexao-s {
+  font: 400 var(--fs, 10px)/1.35 var(--f-dado); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* trilho recolhido */
 .app.rail-min .marca-txt,
