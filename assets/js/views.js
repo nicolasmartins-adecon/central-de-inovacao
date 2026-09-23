@@ -2156,15 +2156,12 @@ CI.views = (function () {
   }
 
   function palcoAnimado() {
-    const LW = 560, LH = 262;
-    const CX = 280, CY = 134, RX = 186, RY = 72;
-
     const cv = h("canvas", {
       role: "img",
       "aria-label": "Animação: as diretorias da Adecon, a presidência e as conexões dispostas " +
                     "em um anel que gira devagar, ligadas a um núcleo central. Conexões se " +
                     "acendem entre elas, representando as ações tocadas em conjunto.",
-      estilo: { display: "block", width: "100%", height: "auto", aspectRatio: "560 / 262" }
+      estilo: { display: "block", width: "100%" }
     });
     const ctx = cv.getContext("2d");
 
@@ -2199,11 +2196,29 @@ CI.views = (function () {
     const PASSO = DUR_CICLO / LIGACOES.length;
     const DURA = 1750;      // quanto tempo cada conexão fica visível
 
+    /* Geometria em pixels de CSS: o anel cresce com o espaço disponível, mas
+       traços e letras continuam no tamanho certo — o palco fica maior de
+       verdade, em vez de virar um zoom do desenho pequeno. */
+    let G = { w: 720, h: 320, cx: 360, cy: 160, rx: 286, ry: 104, k: 1 };
+
+    function medir() {
+      const w = Math.max(320, Math.round(cv.clientWidth || 720));
+      const alt = Math.round(Math.max(290, Math.min(560, w * 0.44)));
+      const estreito = w < 620;
+      return {
+        w, h: alt,
+        cx: w / 2, cy: alt / 2,
+        rx: Math.max(96, w / 2 - (estreito ? 46 : 78)),
+        ry: Math.max(54, alt / 2 - (estreito ? 40 : 58)),
+        k: Math.min(1.5, Math.max(0.9, w / 820))
+      };
+    }
+
     const posicao = (i, giro) => {
       const a = -Math.PI / 2 + (i / NOS.length) * Math.PI * 2 + giro;
       return {
-        x: CX + RX * Math.cos(a),
-        y: CY + RY * Math.sin(a),
+        x: G.cx + G.rx * Math.cos(a),
+        y: G.cy + G.ry * Math.sin(a),
         // quem está na frente do anel aparece maior e mais nítido
         frente: (Math.sin(a) + 1) / 2,
         a
@@ -2213,7 +2228,7 @@ CI.views = (function () {
     /** Curva que passa por dentro do anel, entre dois nós. */
     function pontoDaCurva(p0, p1, u) {
       const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
-      const cx = mx + (CX - mx) * .62, cy = my + (CY - my) * .62;
+      const cx = mx + (G.cx - mx) * .62, cy = my + (G.cy - my) * .62;
       const v = 1 - u;
       return {
         x: v * v * p0.x + 2 * v * u * cx + u * u * p1.x,
@@ -2222,12 +2237,13 @@ CI.views = (function () {
     }
 
     function desenharCena(t) {
+      const { w: LW, h: LH, cx: CX, cy: CY, rx: RX, ry: RY, k } = G;
       ctx.clearRect(0, 0, LW, LH);
       const giro = (t / DUR_CICLO) * Math.PI * 2;
       const pontos = NOS.map((_, i) => posicao(i, giro));
 
       /* trilho do anel */
-      ctx.strokeStyle = C.suave;
+      ctx.strokeStyle = C.linha;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.ellipse(CX, CY, RX, RY, 0, 0, Math.PI * 2);
@@ -2235,7 +2251,7 @@ CI.views = (function () {
 
       /* raios até o núcleo */
       pontos.forEach((p, i) => {
-        ctx.strokeStyle = comAlfa(NOS[i].tom, .06 + p.frente * .10);
+        ctx.strokeStyle = comAlfa(NOS[i].tom, .08 + p.frente * .13);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(CX, CY);
@@ -2261,7 +2277,7 @@ CI.views = (function () {
           grad.addColorStop(0, comAlfa(NOS[a].tom, .85 * some * nitidez));
           grad.addColorStop(1, comAlfa(NOS[b].tom, .85 * some * nitidez));
           ctx.strokeStyle = grad;
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 1.5 * k;
           ctx.lineCap = "round";
           ctx.beginPath();
           const passos = 40;
@@ -2275,13 +2291,14 @@ CI.views = (function () {
           const pu = sat01((u - .18) / .44);
           if (pu > 0 && pu < 1) {
             const q = pontoDaCurva(p0, p1, suave(pu));
-            const halo = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 9);
+            const raioHalo = 9 * k;
+            const halo = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, raioHalo);
             halo.addColorStop(0, comAlfa(C.acento, .55 * some));
             halo.addColorStop(1, comAlfa(C.acento, 0));
             ctx.fillStyle = halo;
-            ctx.beginPath(); ctx.arc(q.x, q.y, 9, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.arc(q.x, q.y, raioHalo, 0, 7); ctx.fill();
             ctx.fillStyle = comAlfa(C.acento, some);
-            ctx.beginPath(); ctx.arc(q.x, q.y, 2.3, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.arc(q.x, q.y, 2.3 * k, 0, 7); ctx.fill();
           }
 
           brilho[a] = Math.max(brilho[a], saiCubica(sat01(u / .2)) * some);
@@ -2291,67 +2308,70 @@ CI.views = (function () {
           const ru = sat01((u - .6) / .3);
           if (ru > 0 && ru < 1) {
             ctx.strokeStyle = comAlfa(NOS[b].tom, (1 - ru) * .7);
-            ctx.lineWidth = 1.4;
+            ctx.lineWidth = 1.4 * k;
             ctx.beginPath();
-            ctx.arc(p1.x, p1.y, 7 + ru * 16, 0, 7);
+            ctx.arc(p1.x, p1.y, (7 + ru * 16) * k, 0, 7);
             ctx.stroke();
           }
         });
       });
 
       /* núcleo */
-      const respira = .5 + .5 * Math.sin(t / 1400);
-      const halo = ctx.createRadialGradient(CX, CY, 0, CX, CY, 46);
+      // o período precisa dividir DUR_CICLO, senão a volta completa não fecha
+      const respira = .5 + .5 * Math.sin((2 * Math.PI * t) / (DUR_CICLO / 2));
+      const rNucleo = 46 * k;
+      const halo = ctx.createRadialGradient(CX, CY, 0, CX, CY, rNucleo);
       halo.addColorStop(0, comAlfa(C.acento, .12 + respira * .05));
       halo.addColorStop(1, comAlfa(C.acento, 0));
       ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(CX, CY, 46, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(CX, CY, rNucleo, 0, 7); ctx.fill();
 
       ctx.strokeStyle = comAlfa(C.acento, .22 + respira * .12);
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(CX, CY, 27 + respira * 1.5, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(CX, CY, (27 + respira * 1.5) * k, 0, 7); ctx.stroke();
 
       ctx.fillStyle = C.painel;
-      ctx.beginPath(); ctx.arc(CX, CY, 19, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(CX, CY, 19 * k, 0, 7); ctx.fill();
       ctx.strokeStyle = comAlfa(C.acento, .55);
-      ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(CX, CY, 19, 0, 7); ctx.stroke();
+      ctx.lineWidth = 1.4 * k;
+      ctx.beginPath(); ctx.arc(CX, CY, 19 * k, 0, 7); ctx.stroke();
 
       ctx.fillStyle = C.txt;
-      ctx.font = '600 8px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.font = `600 ${(8 * k).toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("ADECON", CX, CY - 3);
+      ctx.fillText("ADECON", CX, CY - 3 * k);
       ctx.fillStyle = comAlfa(C.acento, .9);
-      ctx.font = '600 6.5px "IBM Plex Mono", ui-monospace, monospace';
-      ctx.fillText("INOVAÇÃO", CX, CY + 7);
+      ctx.font = `600 ${(6.5 * k).toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
+      ctx.fillText("INOVAÇÃO", CX, CY + 7 * k);
 
       /* nós — os de trás primeiro, para a profundidade ficar correta */
       NOS.map((n, i) => ({ n, i, p: pontos[i] }))
          .sort((a, b) => a.p.frente - b.p.frente)
          .forEach(({ n, i, p }) => {
         const f = p.frente, b = brilho[i];
-        const r = 5 + f * 3 + b * 2.5;
+        const r = (6.6 + f * 3.6 + b * 3) * k;
 
         if (b > .02) {
-          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+          const rg = 26 * k;
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rg);
           g.addColorStop(0, comAlfa(n.tom, .32 * b));
           g.addColorStop(1, comAlfa(n.tom, 0));
           ctx.fillStyle = g;
-          ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(p.x, p.y, rg, 0, 7); ctx.fill();
         }
 
         ctx.fillStyle = comAlfa(n.tom, .42 + f * .45 + b * .13);
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
 
         ctx.fillStyle = C.painel;
-        ctx.beginPath(); ctx.arc(p.x, p.y, r - 2.2, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, r - 2.9 * k, 0, 7); ctx.fill();
         ctx.fillStyle = comAlfa(n.tom, .6 + f * .4);
-        ctx.beginPath(); ctx.arc(p.x, p.y, r - 3.8, 0, 7); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, r - 5 * k, 0, 7); ctx.fill();
 
-        const lx = CX + (RX + 26) * Math.cos(p.a);
-        const ly = CY + (RY + 19) * Math.sin(p.a);
-        ctx.font = `600 ${(7.6 + f * 1.4).toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
+        const lx = CX + (RX + 26 * k) * Math.cos(p.a);
+        const ly = CY + (RY + 19 * k) * Math.sin(p.a);
+        ctx.font = `600 ${((8.4 + f * 1.6) * k).toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
         ctx.fillStyle = comAlfa(b > .3 ? n.tom : C.muted, .35 + f * .45 + b * .2);
         ctx.fillText(n.sigla, lx, ly);
       });
@@ -2361,12 +2381,15 @@ CI.views = (function () {
 
     function ajustar() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const cssW = cv.clientWidth || LW;
-      const alvoW = Math.round(cssW * dpr);
-      const alvoH = Math.round(cssW * (LH / LW) * dpr);
-      const mudou = cv.width !== alvoW || cv.height !== alvoH;
-      if (mudou) { cv.width = alvoW; cv.height = alvoH; }
-      ctx.setTransform(alvoW / LW, 0, 0, alvoW / LW, 0, 0);
+      const g = medir();
+      const mudou = g.w !== G.w || g.h !== G.h;
+      G = g;
+      const alvoW = Math.round(g.w * dpr), alvoH = Math.round(g.h * dpr);
+      if (cv.width !== alvoW || cv.height !== alvoH) {
+        cv.width = alvoW; cv.height = alvoH;
+        cv.style.height = g.h + "px";
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       return mudou;
     }
 
@@ -2427,12 +2450,15 @@ CI.views = (function () {
 
     return h("div.view",
       h("section.inicio",
-        h("span.rotulo", `${(window.CI_CONFIG || {}).EMPRESA || "Adecon"} · ciclo ${(window.CI_CONFIG || {}).ANO_CICLO || new Date().getFullYear()}`),
-        h("h1", "Uma empresa que ", h("em", "se planeja em voz alta")),
-        h("p.chamada",
-          `Os projetos internos ${fraseDiretorias(diretoriasContaveis().length)} em um lugar só: `,
-          "cronograma por semana, etapas com dono e prazo, comentários onde a decisão ",
-          "acontece e os indicadores se atualizando conforme a execução anda."),
+        h("div.inicio-cabeca",
+          h("span.rotulo", `${(window.CI_CONFIG || {}).EMPRESA || "Adecon"} · ciclo ${(window.CI_CONFIG || {}).ANO_CICLO || new Date().getFullYear()}`),
+          h("h1", "Central de ", h("em", "Inovação")),
+          h("p.inicio-lema", "Uma empresa que se planeja em voz alta"),
+          h("p.chamada",
+            `Os projetos internos ${fraseDiretorias(diretoriasContaveis().length)} em um lugar só: `,
+            "cronograma por semana, etapas com dono e prazo, comentários onde a decisão ",
+            "acontece e os indicadores se atualizando conforme a execução anda.")
+        ),
 
         h("div.palco",
           palcoAnimado(),
