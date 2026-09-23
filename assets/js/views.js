@@ -57,6 +57,14 @@ CI.views = (function () {
      outra diretoria; só não entram quando o número é o assunto. */
   const diretoriasContaveis = () => db.dados.diretorias.filter(d => d.conta_no_total !== false);
 
+  /* "das seis diretorias" — o texto acompanha o cadastro, sem número na mão. */
+  const EXTENSO = ["nenhuma", "uma", "duas", "três", "quatro", "cinco", "seis",
+                   "sete", "oito", "nove", "dez", "onze", "doze"];
+  function fraseDiretorias(n) {
+    if (n === 1) return "da diretoria";
+    return `das ${EXTENSO[n] || n} diretorias`;
+  }
+
   /* ---- ações compartilhadas ---------------------------------------------
      Uma ação é UMA linha no banco. `diretoria_id` é a diretoria responsável e
      `diretorias_apoio` guarda as demais envolvidas. Ela aparece no quadro de
@@ -2126,7 +2134,8 @@ CI.views = (function () {
 
   /* =========================================================================
      PÁGINA INICIAL — a rede das diretorias
-     As oito diretorias giram devagar num anel visto de perfil, ligadas a um
+     As oito áreas (diretorias, presidência e conexões) giram devagar num anel
+     visto de perfil, ligadas a um
      núcleo central. A cada 2,5 s uma conexão se acende entre duas delas e um
      pulso percorre o traçado: é uma ação conjunta nascendo. Volta completa em
      20 s, tudo calculado a partir do tempo — o laço fecha sem emenda.
@@ -2152,9 +2161,9 @@ CI.views = (function () {
 
     const cv = h("canvas", {
       role: "img",
-      "aria-label": "Animação: as oito diretorias da Adecon dispostas em um anel que gira " +
-                    "devagar, ligadas a um núcleo central. Conexões se acendem entre elas, " +
-                    "representando as ações tocadas em conjunto.",
+      "aria-label": "Animação: as diretorias da Adecon, a presidência e as conexões dispostas " +
+                    "em um anel que gira devagar, ligadas a um núcleo central. Conexões se " +
+                    "acendem entre elas, representando as ações tocadas em conjunto.",
       estilo: { display: "block", width: "100%", height: "auto", aspectRatio: "560 / 262" }
     });
     const ctx = cv.getContext("2d");
@@ -2421,9 +2430,9 @@ CI.views = (function () {
         h("span.rotulo", `${(window.CI_CONFIG || {}).EMPRESA || "Adecon"} · ciclo ${(window.CI_CONFIG || {}).ANO_CICLO || new Date().getFullYear()}`),
         h("h1", "Uma empresa que ", h("em", "se planeja em voz alta")),
         h("p.chamada",
-          "Os projetos internos das oito diretorias em um lugar só: cronograma por semana, ",
-          "etapas com dono e prazo, comentários onde a decisão acontece e os indicadores ",
-          "se atualizando conforme a execução anda."),
+          `Os projetos internos ${fraseDiretorias(diretoriasContaveis().length)} em um lugar só: `,
+          "cronograma por semana, etapas com dono e prazo, comentários onde a decisão ",
+          "acontece e os indicadores se atualizando conforme a execução anda."),
 
         h("div.palco",
           palcoAnimado(),
