@@ -15,7 +15,7 @@ CI.db = (function () {
 
   const TABELAS = [
     "diretorias", "projetos", "etapas", "comentarios",
-    "itens_diretoria", "implementacoes", "avaliacoes", "inscricoes"
+    "itens_diretoria", "implementacoes", "avaliacoes", "inscricoes", "ideias"
   ];
 
   /* ---- armazenamento local tolerante a falha -------------------------- */
@@ -154,7 +154,7 @@ CI.db = (function () {
 
   /* Cores e estrutura são definição do sistema, não dado do usuário: quando
      mudam no seed, atualizamos o que já estiver gravado neste navegador. */
-  const VERSAO_DADOS = 4;
+  const VERSAO_DADOS = 5;
   function migrarDados() {
     if (api.dados.__versaoCores === VERSAO_DADOS) return;
     const seed = copiaSeed();
@@ -177,6 +177,10 @@ CI.db = (function () {
     (api.dados.diretorias || []).forEach(d => {
       if (conta.has(d.id)) d.conta_no_total = conta.get(d.id);
     });
+
+    // v5 — quadro de ideias; só semeia se o mural ainda estiver vazio
+    if (!Array.isArray(api.dados.ideias)) api.dados.ideias = [];
+    if (!api.dados.ideias.length) api.dados.ideias = seed.ideias || [];
 
     api.dados.__versaoCores = VERSAO_DADOS;
   }
@@ -219,7 +223,7 @@ CI.db = (function () {
   function ligarRealtime() {
     try {
       const canal = api.sb.channel("central-inovacao");
-      ["projetos", "etapas", "comentarios", "itens_diretoria", "implementacoes"].forEach(tabela => {
+      ["projetos", "etapas", "comentarios", "itens_diretoria", "implementacoes", "ideias"].forEach(tabela => {
         canal.on("postgres_changes", { event: "*", schema: "public", table: tabela }, payload => {
           aplicarMudanca(tabela, payload);
           api.emitir();
@@ -364,6 +368,48 @@ CI.db = (function () {
       }
     }
     return mudancas.length;
+  };
+
+  /**
+   * Move e reordena ideias no funil de uma vez só.
+   * `mudancas` é [{ id, etapa, ordem }, …] já na posição final desejada.
+   * Aplica na tela primeiro e desfaz tudo se o banco recusar qualquer linha.
+   */
+  api.moverIdeias = async function (mudancas) {
+    const acha = id => api.dados.ideias.find(x => x.id === id);
+    const reais = mudancas.filter(m => {
+      const i = acha(m.id);
+      return i && (i.etapa !== m.etapa || Number(i.ordem) !== Number(m.ordem));
+    });
+    if (!reais.length) return 0;
+
+    const antes = reais.map(m => {
+      const i = acha(m.id);
+      return { id: m.id, etapa: i.etapa, ordem: i.ordem };
+    });
+    const aplicar = lista => lista.forEach(m => {
+      const i = acha(m.id);
+      if (i) { i.etapa = m.etapa; i.ordem = m.ordem; }
+    });
+
+    aplicar(reais);
+    persistirLocal();
+    api.emitir();
+
+    if (api.motor === "supabase") {
+      try {
+        for (const m of reais) {
+          const { error } = await api.sb.from("ideias")
+            .update({ etapa: m.etapa, ordem: m.ordem }).eq("id", m.id);
+          if (error) throw new Error(error.message);
+        }
+      } catch (e) {
+        aplicar(antes);
+        api.emitir();
+        throw e;
+      }
+    }
+    return reais.length;
   };
 
   /* ---- autenticação ----------------------------------------------------- */
