@@ -1128,7 +1128,13 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
 
 .inicio {
   display: flex; flex-direction: column; align-items: center;
-  gap: 24px; padding: 26px 0 44px; text-align: center;
+  gap: 22px; padding: 18px 0 44px; text-align: center;
+}
+
+/* o bloco de texto anda junto, com respiro curto entre as linhas */
+.inicio-cabeca {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 11px; max-width: 900px;
 }
 
 .inicio h1 {
@@ -1142,14 +1148,23 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
 }
+/* O lema e a chamada ficam do tamanho do rótulo "ADECON · CICLO", em branco:
+   o título é o único bloco grande da página. O lema usa o mesmo desenho do
+   rótulo; a chamada mantém a fonte de texto, senão uma frase inteira em
+   caixa-alta a 10px não se lê. */
+.inicio-lema {
+  font: 600 10px/1.4 var(--f-dado);
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--txt);
+}
 .inicio .chamada {
-  max-width: 54ch; color: var(--txt-2);
-  font-size: clamp(14px, 1.5vw, 16.5px); line-height: 1.62;
+  max-width: 62ch; color: var(--txt);
+  font-size: 10px; line-height: 1.75; letter-spacing: .005em;
 }
 
-/* o palco da animação */
+/* o palco da animação — quase a largura toda do conteúdo */
 .palco {
-  position: relative; width: 100%; max-width: 720px;
+  position: relative; width: 100%; max-width: 1180px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-xl);
@@ -1206,6 +1221,8 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
 @media (max-width: 560px) {
   .inicio { padding-top: 12px; gap: 20px; }
   .palco { padding: 6px 6px 2px; border-radius: var(--r-lg); }
+  /* as duas legendas não cabem lado a lado num celular */
+  .palco-rodape { flex-direction: column; align-items: center; gap: 3px; text-align: center; }
 }
 
 /* --- 21B. BRAINSTORM ------------------------------------------------------
