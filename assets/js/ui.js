@@ -212,10 +212,11 @@ CI.ui = (function () {
     requestAnimationFrame(() => cortina.classList.add("aberta"));
   }
 
-  function esconderCortina() {
+  function esconderCortina(imediato) {
     if (!cortina) return;
     cortina.classList.remove("aberta");
-    setTimeout(() => { if (cortina && !cortina.classList.contains("aberta")) cortina.hidden = true; }, 240);
+    if (imediato) cortina.hidden = true;
+    else setTimeout(() => { if (cortina && !cortina.classList.contains("aberta")) cortina.hidden = true; }, 240);
     aoFechar = null;
   }
 
@@ -264,7 +265,9 @@ CI.ui = (function () {
     if (!modalAtual) return;
     const el = modalAtual;
     modalAtual = null;
-    if (imediato) { el.remove(); return; }
+    // Fechar "na marra" (troca de tela) também tem de levar a cortina embora,
+    // senão a página fica escurecida e sem clique até recarregar.
+    if (imediato) { el.remove(); if (!gavetaAtual) esconderCortina(true); return; }
     el.classList.remove("aberto");
     if (!gavetaAtual) esconderCortina();
     setTimeout(() => el.remove(), 220);
@@ -320,7 +323,7 @@ CI.ui = (function () {
     if (!gavetaAtual) return;
     const el = gavetaAtual;
     gavetaAtual = null;
-    if (imediato) { el.remove(); return; }
+    if (imediato) { el.remove(); if (!modalAtual) esconderCortina(true); return; }
     el.classList.remove("aberta");
     if (!modalAtual) esconderCortina();
     setTimeout(() => el.remove(), 300);
