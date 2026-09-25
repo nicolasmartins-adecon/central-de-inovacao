@@ -482,11 +482,22 @@ CI.views = (function () {
       ));
 
       const faixa = h("div.crono-faixa");
-      const ci = colunaDe(p.inicio || p.termino, anoCrono);
-      const cf = colunaDe(p.termino || p.inicio, anoCrono);
 
-      const noAno = (p.inicio && U.paraData(p.inicio)?.getFullYear() <= anoCrono) &&
-                    (p.termino ? U.paraData(p.termino)?.getFullYear() >= anoCrono : true);
+      /* A barra é o pedaço do projeto que cai DENTRO do ciclo mostrado.
+         Com só uma das duas datas preenchidas ela vira uma barra de uma
+         semana — antes o projeto simplesmente sumia da grade e sobrava uma
+         linha vazia, sem explicação. `colunaDe` já apara o que passa do ano,
+         então um projeto que atravessa dezembro aparece nos dois ciclos. */
+      const dataA = p.inicio || p.termino;
+      const dataB = p.termino || p.inicio;
+      const dA = U.paraData(dataA), dB = U.paraData(dataB);
+      const [de, ate] = (dA && dB && dA > dB) ? [dataB, dataA] : [dataA, dataB];
+      const dDe = U.paraData(de), dAte = U.paraData(ate);
+
+      const ci = colunaDe(de, anoCrono);
+      const cf = colunaDe(ate, anoCrono);
+      const noAno = dDe && dAte &&
+                    dDe.getFullYear() <= anoCrono && dAte.getFullYear() >= anoCrono;
 
       if (ci !== null && cf !== null && noAno) {
         const ini = Math.min(ci, cf), fim = Math.max(ci, cf);
@@ -506,6 +517,15 @@ CI.views = (function () {
         );
         ligarArrasto(barra, p);
         faixa.appendChild(barra);
+      } else if (dDe) {
+        /* Tem data, mas em outro ciclo. Em vez de uma faixa vazia, um atalho
+           que diz onde o projeto está e leva até lá. */
+        const alvo = (dAte && dAte.getFullYear() < anoCrono ? dAte : dDe).getFullYear();
+        faixa.appendChild(h("button.crono-fora", {
+          type: "button",
+          title: `${p.nome} está no ciclo ${alvo}. Clique para ir até lá.`,
+          onclick: () => { anoCrono = alvo; CI.app.recarregarVista(); }
+        }, alvo < anoCrono ? `◂ ciclo ${alvo}` : `ciclo ${alvo} ▸`));
       }
 
       linha.appendChild(faixa);
