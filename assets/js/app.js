@@ -314,6 +314,10 @@ CI.app = (function () {
     elRotulo.textContent = rotulo;
     document.title = `${titulo} · Central de Inovação`;
 
+    /* A rota fica marcada no próprio scroller: é ele quem pinta o fundo de
+       tela cheia do Brainstorm, e o CSS precisa saber qual tela está aberta. */
+    elConteudo.dataset.rota = rotaAtual;
+
     U.limpar(elConteudo).appendChild(no);
     atualizarConexao();
   }
