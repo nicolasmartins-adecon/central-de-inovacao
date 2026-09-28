@@ -504,7 +504,7 @@ CI.ui = (function () {
   }
 
   return {
-    h, anexar, limpar, ic, svgEl,
+    h, anexar, limpar, ic, svgEl, CAMINHOS,
     MESES, MESES_C, hojeISO, paraData, dataBR, dataExtenso, diasAte, relativo,
     aviso, abrirModal, fecharModal, confirmar,
     abrirGaveta, fecharGaveta, gavetaAberta,
