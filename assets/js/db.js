@@ -154,7 +154,7 @@ CI.db = (function () {
 
   /* Cores e estrutura são definição do sistema, não dado do usuário: quando
      mudam no seed, atualizamos o que já estiver gravado neste navegador. */
-  const VERSAO_DADOS = 5;
+  const VERSAO_DADOS = 6;
   function migrarDados() {
     if (api.dados.__versaoCores === VERSAO_DADOS) return;
     const seed = copiaSeed();
@@ -181,6 +181,9 @@ CI.db = (function () {
     // v5 — quadro de ideias; só semeia se o mural ainda estiver vazio
     if (!Array.isArray(api.dados.ideias)) api.dados.ideias = [];
     if (!api.dados.ideias.length) api.dados.ideias = seed.ideias || [];
+
+    // v6 — o funil também recebe problemas; o que já existia era ideia
+    api.dados.ideias.forEach(i => { if (!i.natureza) i.natureza = "ideia"; });
 
     api.dados.__versaoCores = VERSAO_DADOS;
   }
