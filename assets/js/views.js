@@ -3431,8 +3431,16 @@ CI.views = (function () {
     const nat = NAT(i);
     const tom = i.diretoria_id ? corDiretoria(i.diretoria_id) : nat.tom;
     const et = ETAPA(i.etapa);
-    return h("article.bs-cartao" + (nat.id === "problema" ? ".problema" : ""),
-      { estilo: { "--tom": tom, "--nat": nat.tom } },
+    return h("article.bs-cartao.abrivel" + (nat.id === "problema" ? ".problema" : ""),
+      {
+        estilo: { "--tom": tom, "--nat": nat.tom },
+        tabindex: "0", role: "button", title: "Abrir a ficha",
+        onclick: ev => { if (ev.target.closest("button, a, input, select, textarea")) return; gavetaIdeia(i.id); },
+        onkeydown: ev => {
+          if (ev.target !== ev.currentTarget) return;
+          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); gavetaIdeia(i.id); }
+        }
+      },
       h("div.bs-topo",
         h("span.bs-nat", { estilo: { "--tom": nat.tom } }, ic(nat.icone), nat.nome),
         chip(i.tipo || "Outro", null, tom),
@@ -3657,6 +3665,9 @@ CI.views = (function () {
     CI.app.recarregarVista();
   }
 
+  let arrastouEm = 0;
+  const acabouDeArrastar = () => Date.now() - arrastouEm < 300;
+
   function ligarFunil(grade) {
     let cartao = null, rolador = null;
 
@@ -3707,6 +3718,9 @@ CI.views = (function () {
       grade.classList.remove("reordenando");
       faixas().forEach(f => f.classList.remove("alvo"));
       cartao = null;
+      /* Soltar o cartão dispara um clique no fim do arrasto. Sem isto, mover
+         uma ideia abriria a ficha dela por cima. */
+      arrastouEm = Date.now();
       gravarFunil(grade);
     };
 
@@ -3734,12 +3748,183 @@ CI.views = (function () {
     return partes.length ? partes.join(" · ") : "vazio";
   }
 
+  /* ---- ficha da ideia -----------------------------------------------------
+     Clicar no cartão abre tudo o que se sabe sobre aquele registro. Com o
+     funil destravado a ficha também edita; com o funil fechado ela só mostra,
+     porque quem está no mural não deve poder mexer no que é dos outros.
+     ---------------------------------------------------------------------- */
+
+  function gavetaIdeia(ideiaId) {
+    const i = db.dados.ideias.find(x => x.id === ideiaId);
+    if (!i) return;
+    const podeEditar = funilAberto();
+    const nat = NAT(i);
+    const et = ETAPA(i.etapa);
+
+    const salvar = async (chave, valor) => {
+      if (String(i[chave] ?? "") === String(valor ?? "")) return;
+      const mudanca = { [chave]: valor };
+      // problema é sempre privado — mudar a natureza arrasta a privacidade junto
+      if (chave === "natureza" && valor === "problema") mudanca.privada = true;
+      try {
+        await db.atualizar("ideias", i.id, mudanca);
+        Object.assign(i, mudanca);
+        U.aviso("Salvo", "ok");
+        CI.app.recarregarVista();
+      } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
+    };
+
+    const quemApoiou = apoios(i).filter(a => a.includes("@"));
+    const nApoios = apoios(i).length;
+
+    const cabecalho = h("div", { estilo: { display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "14px" } },
+      h("span.bs-nat", { estilo: { "--tom": nat.tom } }, ic(nat.icone), nat.nome),
+      h("span.bs-selo-etapa", { estilo: { "--tom": et.tom } }, et.nome),
+      chip(i.tipo || "Outro", null, i.diretoria_id ? corDiretoria(i.diretoria_id) : nat.tom),
+      ehPrivada(i) ? h("span.bs-privada", ic("cadeado"), "privada") : null,
+      i.arquivada ? chip("Arquivada", "warn") : null
+    );
+
+    const ficha = h("dl.vitais",
+      vital("Quem trouxe", i.autor || "anônimo"),
+      vital("Quando", `${U.dataBR(String(i.criado_em).slice(0, 10))} · ${U.relativo(i.criado_em)}`),
+      vital("Diretoria", i.diretoria_id ? (db.diretoria(i.diretoria_id)?.nome || "—") : "não informada"),
+      vital("Apoios", nApoios ? `${nApoios} ${nApoios === 1 ? "raio" : "raios"}` : "nenhum ainda"),
+      podeEditar && i.email ? vital("E-mail de quem trouxe", i.email) : null,
+      podeEditar && quemApoiou.length ? vital("Apoiaram", quemApoiou.join(", ")) : null
+    );
+
+    const corpo = [];
+
+    corpo.push(h("div.gaveta-secao",
+      cabecalho,
+      i.descricao
+        ? h("p", { estilo: { fontSize: "13.5px", lineHeight: 1.6, color: "var(--txt-2)" } }, i.descricao)
+        : h("p.discreto", { estilo: { fontSize: "13px", fontStyle: "italic" } },
+            "Quem trouxe não escreveu detalhes — só a frase do título."),
+      ficha
+    ));
+
+    if (podeEditar) {
+      corpo.push(h("div.gaveta-secao",
+        h("span.rotulo", "Editar"),
+        h("div", { estilo: { marginTop: "10px" } },
+          campo("Título", entrada({
+            value: i.titulo || "", maxlength: 160,
+            onchange: ev => salvar("titulo", ev.target.value.trim())
+          }))),
+        h("div", { estilo: { marginTop: "12px" } },
+          campo("Detalhes", area({
+            rows: 4, value: i.descricao || "", placeholder: "Como funcionaria, que problema resolve, por onde começar.",
+            onchange: ev => salvar("descricao", ev.target.value.trim() || null)
+          }))),
+        h("div.linha-campos", { estilo: { marginTop: "12px" } },
+          campo("Isto é", selecao(TIPOS_IDEIA, {
+            value: i.tipo || "Iniciativa", onchange: ev => salvar("tipo", ev.target.value)
+          })),
+          campo("Natureza", selecao(Object.values(NATUREZAS).map(o => [o.id, o.nome]), {
+            value: nat.id, onchange: ev => salvar("natureza", ev.target.value)
+          }), nat.id === "ideia" ? "Virar problema torna o registro privado." : undefined),
+          campo("Diretoria", selecao(
+            [["", "Não sei ainda"], ...db.dados.diretorias.map(d => [d.id, d.nome])],
+            { value: i.diretoria_id || "", onchange: ev => salvar("diretoria_id", ev.target.value || null) }
+          ))
+        )
+      ));
+
+      corpo.push(h("div.gaveta-secao",
+        h("span.rotulo", "Etapa do funil"),
+        h("div.bs-natureza", { role: "group", "aria-label": "Mover para outra etapa" },
+          ...ETAPAS_FUNIL.map(o => h("button.bs-nat-opcao" + (o.id === (i.etapa || "atracao") ? ".ativa" : ""), {
+            type: "button", "aria-pressed": o.id === (i.etapa || "atracao") ? "true" : "false",
+            estilo: { "--tom": o.tom },
+            onclick: async () => {
+              if (o.id === (i.etapa || "atracao")) return;
+              try {
+                await db.moverIdeias([{ id: i.id, etapa: o.id, ordem: ideiasDaEtapa(o.id).length }]);
+                i.etapa = o.id;
+                U.aviso(`Movida para ${o.nome}`, "ok");
+                U.fecharGaveta();
+                CI.app.recarregarVista();
+              } catch (err) { U.aviso(err.message, "erro"); }
+            }
+          }, o.nome))
+        )
+      ));
+
+      corpo.push(h("div.gaveta-secao",
+        h("span.rotulo", "Privacidade"),
+        nat.id === "problema"
+          ? h("p.discreto", { estilo: { fontSize: "12.5px", lineHeight: 1.55 } },
+              "Problema é sempre privado. Para publicar no mural, mude a natureza para ideia.")
+          : h("div", { estilo: { display: "flex", flexWrap: "wrap", gap: "9px", alignItems: "center" } },
+              h("button.bs-trava" + (i.privada ? ".ativa" : ""), {
+                type: "button", role: "switch", "aria-checked": i.privada ? "true" : "false",
+                onclick: () => salvar("privada", !i.privada)
+              }, ic(i.privada ? "cadeado" : "destravar"), i.privada ? "Privada" : "No mural"),
+              h("span.dica", { estilo: { fontSize: "11.5px", color: "var(--txt-2)", lineHeight: 1.5 } },
+                i.privada
+                  ? "Só quem tem a senha do funil vê este registro."
+                  : "Está visível para a empresa toda no mural."))
+      ));
+
+      corpo.push(h("div.gaveta-secao",
+        h("span.rotulo", "Ações"),
+        h("div", { estilo: { display: "flex", flexWrap: "wrap", gap: "8px" } },
+          h("button.btn.btn-primario", {
+            type: "button",
+            onclick: () => {
+              U.fecharGaveta();
+              modalProjeto(null, {
+                nome: i.titulo,
+                objetivo: i.descricao || "",
+                diretoria_id: i.diretoria_id || db.dados.diretorias[0]?.id || null,
+                tipo: TIPOS.includes(i.tipo) ? i.tipo : "Projeto Interno"
+              });
+            }
+          }, ic("mais"), "Virar projeto"),
+          h("button.btn", {
+            type: "button",
+            onclick: async () => {
+              try {
+                await db.atualizar("ideias", i.id, { arquivada: !i.arquivada });
+                U.aviso(i.arquivada ? "Restaurada" : "Arquivada", "info");
+                U.fecharGaveta();
+                CI.app.recarregarVista();
+              } catch (err) { U.aviso(err.message, "erro"); }
+            }
+          }, ic("caixa"), i.arquivada ? "Restaurar" : "Arquivar")
+        ),
+        h("p.discreto", { estilo: { fontSize: "11.5px", marginTop: "10px", lineHeight: 1.55 } },
+          "Arquivar tira do mural e do funil sem apagar nada — dá para restaurar depois.")
+      ));
+    }
+
+    U.abrirGaveta({
+      rotulo: `${nat.nome} · ${et.nome}`,
+      titulo: i.titulo,
+      corpo
+    });
+  }
+
   function cartaoFunil(i, idx) {
     const nat = NAT(i);
     const tom = i.diretoria_id ? corDiretoria(i.diretoria_id) : nat.tom;
     const nApoios = apoios(i).length;
 
-    return h("article.funil-cartao", { dataset: { id: i.id }, estilo: { "--tom": tom } },
+    return h("article.funil-cartao.abrivel", {
+      dataset: { id: i.id }, estilo: { "--tom": tom },
+      tabindex: "0", role: "button", title: "Abrir a ficha",
+      onclick: ev => {
+        if (acabouDeArrastar()) return;
+        if (ev.target.closest("button, a, input, select, textarea")) return;
+        gavetaIdeia(i.id);
+      },
+      onkeydown: ev => {
+        if (ev.target !== ev.currentTarget) return;
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); gavetaIdeia(i.id); }
+      }
+    },
       h("div", { estilo: { display: "flex", alignItems: "flex-start", gap: "6px" } },
         h("i.funil-nat", { estilo: { "--tom": nat.tom }, title: nat.nome }, ic(nat.icone)),
         h("span.nome", { estilo: { flex: "1 1 auto", minWidth: 0 } }, i.titulo),
@@ -3895,7 +4080,7 @@ CI.views = (function () {
   return {
     vInicio, vPainel, vCronograma, vProjetos, vProjeto, vDiretorias, vImplementacao,
     vIndicadores, vConfig, vBrainstorm,
-    modalProjeto, modalEtapa, gavetaEtapa, buscaGlobal,
+    modalProjeto, modalEtapa, gavetaEtapa, gavetaIdeia, buscaGlobal,
     /* regras puras, expostas para poderem ser conferidas de fora */
     veredito, ehPrivada
   };
