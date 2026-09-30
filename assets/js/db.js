@@ -154,7 +154,7 @@ CI.db = (function () {
 
   /* Cores e estrutura são definição do sistema, não dado do usuário: quando
      mudam no seed, atualizamos o que já estiver gravado neste navegador. */
-  const VERSAO_DADOS = 6;
+  const VERSAO_DADOS = 7;
   function migrarDados() {
     if (api.dados.__versaoCores === VERSAO_DADOS) return;
     const seed = copiaSeed();
@@ -184,6 +184,14 @@ CI.db = (function () {
 
     // v6 — o funil também recebe problemas; o que já existia era ideia
     api.dados.ideias.forEach(i => { if (!i.natureza) i.natureza = "ideia"; });
+
+    /* v7 — registros privados não aparecem no mural. Todo problema é privado
+       por natureza: quem traz um incômodo não deveria ter que expô-lo para a
+       empresa inteira. As ideias antigas continuam públicas, que é como foram
+       publicadas — ninguém escondeu nada pelas costas de quem escreveu. */
+    api.dados.ideias.forEach(i => {
+      if (i.privada === undefined || i.privada === null) i.privada = i.natureza === "problema";
+    });
 
     api.dados.__versaoCores = VERSAO_DADOS;
   }
