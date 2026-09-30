@@ -1438,6 +1438,17 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
   font-size: 11.5px; color: var(--faint); margin-right: auto; max-width: 44ch; line-height: 1.5;
 }
 
+/* Cartão que abre a ficha ao clique. O cursor e o leve levantar dizem que ali
+   tem mais do que está à vista. */
+.abrivel { cursor: pointer; }
+.abrivel:focus-visible { outline: none; box-shadow: var(--anel); }
+.funil-cartao.abrivel:hover { border-color: var(--accent-line); }
+.bs-cartao.abrivel:hover { border-color: var(--accent-line); transform: translateY(-1px); }
+.bs-cartao.abrivel { transition: border-color .15s ease, transform .15s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .bs-cartao.abrivel:hover { transform: none; }
+}
+
 /* Placar geral de prazo, no topo do painel: mesma leitura dos cartões de
    indicador, com a quebra por diretoria logo abaixo. */
 .prazo-placar {
