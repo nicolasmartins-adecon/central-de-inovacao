@@ -849,6 +849,9 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
 .marcador svg { width: 12px; height: 12px; }
 .etapa.feita .marcador { background: var(--ok); border-color: var(--ok); color: #05130C; }
 .etapa.atrasada .marcador { border-color: var(--crit); color: var(--crit); }
+/* Entregue, mas depois da data: o trabalho saiu, e isso fica registrado.
+   Marca discreta — é histórico, não alarme. */
+.etapa.furou .marcador { background: var(--warn); border-color: var(--warn); color: #150C01; }
 
 .etapa-corpo { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .etapa-desc { font-size: 13.5px; line-height: 1.45; color: var(--txt); }
@@ -1434,6 +1437,77 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
 .bs-envio-pe .dica {
   font-size: 11.5px; color: var(--faint); margin-right: auto; max-width: 44ch; line-height: 1.5;
 }
+
+/* Placar geral de prazo, no topo do painel: mesma leitura dos cartões de
+   indicador, com a quebra por diretoria logo abaixo. */
+.prazo-placar {
+  display: flex; gap: 16px; align-items: center;
+  padding-bottom: 18px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 520px) {
+  .prazo-placar { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+
+/* --- escolha de privacidade ---
+   Fica entre os campos e o botão, no caminho do olho de quem vai publicar: é a
+   última decisão antes de mandar, e a mais difícil de desfazer. */
+.bs-reserva {
+  display: flex; flex-wrap: wrap; gap: 9px; align-items: center;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--raise);
+}
+.bs-reserva .dica {
+  font-size: 11.5px; color: var(--txt-2); line-height: 1.5; max-width: 52ch;
+}
+.bs-reserva .dica strong { color: var(--txt); font-weight: 600; }
+.bs-reserva.travada {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--line));
+  background: color-mix(in srgb, var(--warn) 8%, var(--raise));
+}
+.bs-reserva.travada > svg { width: 15px; height: 15px; color: var(--warn); flex: none; }
+
+.bs-trava {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  height: 30px; padding: 0 12px;
+  border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--txt-2);
+  font: 600 12px var(--f-ui);
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.bs-trava svg { width: 13px; height: 13px; }
+.bs-trava:hover { border-color: var(--accent-line); color: var(--txt); }
+.bs-trava:focus-visible { outline: none; box-shadow: var(--anel); }
+.bs-trava.ativa {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* selo no cartão, dentro do funil */
+.bs-privada {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: var(--warn);
+  font: 600 10px/1 var(--f-dado); letter-spacing: .04em; text-transform: uppercase;
+}
+.bs-privada svg { width: 10px; height: 10px; }
+
+/* rodapé do mural: explica para onde foi o que não está ali */
+.bs-reservado {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: 16px; padding-top: 13px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px; line-height: 1.55; color: var(--faint);
+}
+.bs-reservado svg { width: 13px; height: 13px; flex: none; margin-top: 1px; }
 
 /* --- mural --- */
 .bs-filtros { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
