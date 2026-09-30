@@ -169,18 +169,68 @@ CI.views = (function () {
     };
   }
 
+  /* ---- veredito de prazo -------------------------------------------------
+     O resultado da entrega é calculado, nunca digitado: sai da comparação
+     entre a data combinada e o dia em que a etapa foi concluída. Ninguém
+     precisa julgar, ninguém precisa lembrar, e o número dos indicadores não
+     depende de alguém ter sentado para marcar.
+
+     `prazo_original` é a rede de proteção: se a data for adiada depois de já
+     ter vencido, a data antiga fica guardada e é ela que vale no veredito.
+     Adiar serve para reorganizar o trabalho, não para limpar o histórico.
+     -------------------------------------------------------------------- */
+
+  const prazoQueVale = e => e.prazo_original || e.data_entrega;
+
+  const VEREDITOS = {
+    "no-prazo":      { nome: "No prazo",      tom: "ok",   icone: "check"  },
+    "fora-do-prazo": { nome: "Fora do prazo", tom: "warn", icone: "alerta" },
+    "nao-entregue":  { nome: "Não entregue",  tom: "crit", icone: "alerta" }
+  };
+
+  function veredito(e) {
+    const prazo = prazoQueVale(e);
+    if (!prazo) return "sem-prazo";               // nada combinado, nada a cobrar
+    if (e.concluida) {
+      if (!e.concluida_em) return "no-prazo";     // concluída antes de guardarmos a data
+      return e.concluida_em.slice(0, 10) <= prazo ? "no-prazo" : "fora-do-prazo";
+    }
+    return U.diasAte(prazo) < 0 ? "nao-entregue" : "em-dia";
+  }
+
+  /** Entrou no prazo combinado? */
+  const cumpriuPrazo = e => veredito(e) === "no-prazo";
+  const furouPrazo = e => { const v = veredito(e); return v === "nao-entregue" || v === "fora-do-prazo"; };
+
+  /* Só entra no placar a etapa que já tem o que julgar: foi concluída, ou a
+     data passou. Etapa aberta e ainda dentro do prazo não é acerto nem erro —
+     contá-la puxaria o número da diretoria para baixo por trabalho que ainda
+     nem devia estar pronto. */
+  const julgada = e => cumpriuPrazo(e) || furouPrazo(e);
+
+  function chipVeredito(e) {
+    const v = VEREDITOS[veredito(e)];
+    return v ? chip(v.nome, v.tom) : null;
+  }
+
   function chipPrazo(etapa) {
-    if (etapa.concluida) return chip("Concluída", "ok");
+    const v = veredito(etapa);
+    if (v === "nao-entregue") {
+      const d = Math.abs(U.diasAte(prazoQueVale(etapa)));
+      return chip(`Não entregue · ${d} d`, "crit");
+    }
+    if (v === "fora-do-prazo") return chip("Entregue fora do prazo", "warn");
+    if (etapa.concluida) return chip("Entregue no prazo", "ok");
     if (!etapa.data_entrega) return chip("Sem data");
     const d = U.diasAte(etapa.data_entrega);
-    if (d < 0) return chip(`${Math.abs(d)} d de atraso`, "crit");
     if (d === 0) return chip("Vence hoje", "warn");
     if (d <= 7) return chip(`Em ${d} d`, "warn");
     return chip(U.dataBR(etapa.data_entrega));
   }
 
+  /** Aberta e com o prazo já vencido. */
   function etapaAtrasada(e) {
-    return !e.concluida && e.data_entrega && U.diasAte(e.data_entrega) < 0;
+    return veredito(e) === "nao-entregue";
   }
 
   /* ---- gráfico de barras horizontais ------------------------------------ */
@@ -234,7 +284,8 @@ CI.views = (function () {
         pct: etapas.length ? (feitas / etapas.length) * 100 : 0, tom: "var(--ok)"
       }),
       kpi({
-        nome: "Entregas fora do prazo", desc: atrasadas.length ? "Precisam de repactuação" : "Nenhuma pendência vencida",
+        nome: "Não entregues",
+        desc: atrasadas.length ? "Passaram da data e seguem abertas" : "Nenhuma pendência vencida",
         valor: atrasadas.length,
         pct: etapas.length ? (atrasadas.length / etapas.length) * 100 : 0,
         tom: atrasadas.length ? "var(--crit)" : "var(--ok)"
@@ -915,8 +966,10 @@ CI.views = (function () {
 
   function linhaEtapa(e, p) {
     const nComentarios = db.comentariosDe(e.id).length;
-    const atrasada = etapaAtrasada(e);
-    return h("div.etapa" + (e.concluida ? ".feita" : "") + (atrasada ? ".atrasada" : ""), {
+    const v = veredito(e);
+    return h("div.etapa" + (e.concluida ? ".feita" : "") +
+             (v === "nao-entregue" ? ".atrasada" : "") +
+             (v === "fora-do-prazo" ? ".furou" : ""), {
       dataset: { id: e.id },
       onclick: ev => {
         if (ev.target.closest(".marcador") || ev.target.closest(".etapa-puxador")) return;
@@ -949,6 +1002,9 @@ CI.views = (function () {
         h("div.etapa-meta",
           e.responsavel ? chip(e.responsavel, null, "var(--d-peri)") : chip("Sem responsável", "warn"),
           chipPrazo(e),
+          e.prazo_original
+            ? chip("Repactuada", null, "var(--warn)")
+            : null,
           e.arquivo_url ? chip("Arquivo") : null,
           e.observacao ? chip("Com observação") : null
         )
@@ -1101,6 +1157,30 @@ CI.views = (function () {
       } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
     };
 
+    /* Adiar um prazo já vencido guarda a data antiga, que segue valendo no
+       veredito. Repactuar é reorganizar o trabalho — não é apagar que a
+       entrega não saiu. Quem adia vê isso escrito na hora. */
+    const salvarPrazo = async (nova) => {
+      const antiga = e.data_entrega || null;
+      if (String(antiga ?? "") === String(nova ?? "")) return;
+      const extra = {};
+      if (!e.prazo_original && antiga && !e.concluida && U.diasAte(antiga) < 0) {
+        extra.prazo_original = antiga;
+        extra.repactuada_em = new Date().toISOString();
+      }
+      try {
+        await db.atualizar("etapas", e.id, Object.assign({ data_entrega: nova }, extra));
+        e.data_entrega = nova;
+        Object.assign(e, extra);
+        if (extra.prazo_original) {
+          U.aviso(`Prazo adiado. ${U.dataBR(extra.prazo_original)} fica registrado como não entregue.`, "alerta");
+        } else {
+          U.aviso("Salvo", "ok");
+        }
+        CI.app.recarregarVista();
+      } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
+    };
+
     const conversa = h("div.conversa");
     const compositor = h("textarea.entrada", {
       placeholder: "Escreva um comentário… (Ctrl+Enter envia)",
@@ -1180,8 +1260,10 @@ CI.views = (function () {
           })),
           campo("Data de entrega", entrada({
             type: "date", value: (e.data_entrega || "").slice(0, 10),
-            onchange: ev => salvar("data_entrega", ev.target.value || null)
-          }))
+            onchange: ev => salvarPrazo(ev.target.value || null)
+          }), e.prazo_original
+            ? `Repactuada. O prazo combinado antes era ${U.dataBR(e.prazo_original)}, e é ele que continua valendo no veredito.`
+            : undefined)
         ),
         h("div", { estilo: { marginTop: "12px" } },
           campo("E-mail do responsável", entrada({
@@ -1676,6 +1758,26 @@ CI.views = (function () {
     const atingidos = internos.filter(p => p.status === "Concluído").length;
     const inov = internos.length ? Math.round((atingidos / internos.length) * 100) : 0;
 
+    /* Cumprimento de prazo: o único indicador daqui que ninguém lança à mão.
+       Sai inteiro das datas — o que foi combinado e o que aconteceu. */
+    const comPrazo = db.dados.etapas.filter(julgada);
+    const noPrazo = comPrazo.filter(cumpriuPrazo).length;
+    const naoEntregues = comPrazo.filter(e => veredito(e) === "nao-entregue").length;
+    const foraDoPrazo = comPrazo.filter(e => veredito(e) === "fora-do-prazo").length;
+    const pctPrazo = comPrazo.length ? Math.round((noPrazo / comPrazo.length) * 100) : 0;
+
+    const prazoPorDir = db.dados.diretorias.map(d => {
+      const ids = db.dados.projetos.filter(p => participa(p, d.id)).map(p => p.id);
+      const es = db.dados.etapas.filter(e => ids.includes(e.projeto_id) && julgada(e));
+      return {
+        rotulo: d.nome,
+        valor: es.filter(cumpriuPrazo).length,
+        total: es.length,
+        abertas: es.filter(e => veredito(e) === "nao-entregue").length,
+        tom: U.corVisivel(d.cor)
+      };
+    }).filter(x => x.total > 0).sort((a, b) => (b.valor / b.total) - (a.valor / a.total));
+
     const cartao = (titulo, formula, valor, detalhe, tom) => h("section.painel",
       h("div.painel-hd", h("h2", titulo)),
       h("div.painel-bd", { estilo: { display: "flex", gap: "16px", alignItems: "center" } },
@@ -1741,6 +1843,53 @@ CI.views = (function () {
         h("section.painel",
           h("div.painel-hd", h("h2", "Situação dos projetos")),
           h("div.painel-bd", barras(porStatus))
+        )
+      ),
+      h("section.painel.surge", { estilo: { marginTop: "14px" } },
+        h("div.painel-hd", h("h2", "Entregas no prazo"),
+          h("div.acoes", h("span.rotulo", "calculado pelas datas"))),
+        h("div.painel-bd",
+          /* O placar geral primeiro, com a mesma cara dos indicadores de cima,
+             e logo abaixo a quebra por diretoria. */
+          h("div.prazo-placar",
+            anel(pctPrazo, pctPrazo >= 80 ? "var(--ok)" : pctPrazo >= 50 ? "var(--warn)" : "var(--crit)", 86, 8),
+            h("div", { estilo: { minWidth: 0 } },
+              h("div", { estilo: { font: "800 34px/1 var(--f-display)", letterSpacing: "-.035em", fontVariantNumeric: "tabular-nums" } },
+                pctPrazo + "%"),
+              h("div.rotulo", { estilo: { marginTop: "7px" } }, "no prazo ÷ etapas já vencidas"),
+              h("p.discreto", { estilo: { fontSize: "12.5px", marginTop: "7px", lineHeight: 1.5 } },
+                comPrazo.length
+                  ? `${noPrazo} de ${comPrazo.length} etapas que já chegaram na data combinada. ` +
+                    `${naoEntregues} não entregue${naoEntregues === 1 ? "" : "s"} e ` +
+                    `${foraDoPrazo} entregue${foraDoPrazo === 1 ? "" : "s"} depois da data.`
+                  : "Nenhuma etapa chegou na data de entrega ainda.")
+            )
+          ),
+          prazoPorDir.length
+            ? h("div", { estilo: { display: "flex", flexDirection: "column", gap: "11px" } },
+                ...prazoPorDir.map(d => h("div",
+                  h("div", { estilo: { display: "flex", justifyContent: "space-between", gap: "10px", marginBottom: "5px" } },
+                    h("span.truncar", { estilo: { fontSize: "12.5px", color: "var(--txt-2)" } }, d.rotulo),
+                    h("span", { estilo: { display: "flex", gap: "8px", alignItems: "baseline", flex: "none" } },
+                      d.abertas
+                        ? h("span.dado", { estilo: { fontSize: "11px", color: "var(--crit)" } },
+                            `${d.abertas} não entregue${d.abertas === 1 ? "" : "s"}`)
+                        : null,
+                      h("span.dado", { estilo: { fontSize: "11.5px", color: "var(--muted)" } }, `${d.valor}/${d.total}`)
+                    )
+                  ),
+                  h("div.progresso", h("i", { estilo: { width: Math.round((d.valor / d.total) * 100) + "%", "--tom": d.tom } }))
+                ))
+              )
+            : U.vazio("relogio", "Nenhuma etapa chegou na data ainda",
+                "Assim que a primeira data de entrega vencer, este placar se preenche sozinho."),
+          h("p.discreto", { estilo: { fontSize: "11.5px", marginTop: "13px", lineHeight: 1.55 } },
+            "Ninguém lança este número, e só entra aqui etapa que já chegou na data — " +
+            "o que ainda está dentro do prazo não é acerto nem erro. " +
+            "A etapa que passa da data combinada e continua aberta " +
+            "vira “não entregue” por conta própria, e concluir depois não desfaz isso: " +
+            "fica registrada como entregue fora do prazo. Adiar a data também não limpa — " +
+            "o prazo combinado antes continua valendo.")
         )
       ),
       h("section.painel.surge", { estilo: { marginTop: "14px" } },
@@ -2074,13 +2223,19 @@ CI.views = (function () {
   }
 
   function exportarProjeto(p) {
-    const linhas = [csvLinha(["Etapa", "Descrição", "Responsável", "E-mail", "Data de entrega", "Dentro do prazo", "Concluída", "Observação", "Anotações", "Arquivo"])];
+    const linhas = [csvLinha(["Etapa", "Descrição", "Responsável", "E-mail", "Data de entrega",
+      "Prazo combinado antes", "Veredito", "Dentro do prazo", "Concluída",
+      "Observação", "Anotações", "Arquivo"])];
+    const PALAVRA = {
+      "no-prazo": "Entregue no prazo", "fora-do-prazo": "Entregue fora do prazo",
+      "nao-entregue": "Não entregue", "em-dia": "Em aberto, dentro do prazo", "sem-prazo": "Sem data"
+    };
     db.etapasDe(p.id).forEach(e => {
-      const dentro = e.concluida
-        ? (!e.data_entrega || !e.concluida_em || e.concluida_em.slice(0, 10) <= e.data_entrega)
-        : (!e.data_entrega || U.diasAte(e.data_entrega) >= 0);
+      const v = veredito(e);
       linhas.push(csvLinha([e.numero, e.descricao, e.responsavel, e.responsavel_email,
-        e.data_entrega ? U.dataBR(e.data_entrega) : "", dentro ? "SIM" : "NÃO",
+        e.data_entrega ? U.dataBR(e.data_entrega) : "",
+        e.prazo_original ? U.dataBR(e.prazo_original) : "",
+        PALAVRA[v] || v, furouPrazo(e) ? "NÃO" : "SIM",
         e.concluida ? "SIM" : "NÃO", e.observacao, e.anotacoes, e.arquivo_url]));
     });
     baixar(`${p.nome.replace(/[^\w\-]+/g, "_")}.csv`, "﻿" + linhas.join("\n"), "text/csv;charset=utf-8");
@@ -2551,12 +2706,18 @@ CI.views = (function () {
   const ETAPA = id => ETAPAS_FUNIL.find(e => e.id === id) || ETAPAS_FUNIL[0];
 
   let bsFiltro = "Todos";
-  let bsNat = "tudo";              // filtro do mural: tudo | ideia | problema
   let bsNatureza = "ideia";        // o que o formulário está prestes a enviar
   let bsOrdem = "recentes";
   let bsArquivadas = false;
 
   const ideiasVivas = () => db.dados.ideias.filter(i => !i.arquivada);
+
+  /* Privado = fora do mural, dentro do funil. Todo problema é privado, tenha
+     ou não o campo gravado: quem traz um incômodo não deveria precisar expô-lo
+     para a empresa inteira para que ele seja tratado. */
+  const ehPrivada = i => NAT(i).id === "problema" || i.privada === true;
+  const ideiasPublicas = () => ideiasVivas().filter(i => !ehPrivada(i));
+
   const ideiasDaEtapa = id => ideiasVivas()
     .filter(i => (i.etapa || "atracao") === id)
     .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) ||
@@ -3275,6 +3436,9 @@ CI.views = (function () {
       h("div.bs-topo",
         h("span.bs-nat", { estilo: { "--tom": nat.tom } }, ic(nat.icone), nat.nome),
         chip(i.tipo || "Outro", null, tom),
+        /* No funil, o selo lembra quem está lendo que aquilo não é público —
+           importa na hora de citar o assunto numa reunião. */
+        ehPrivada(i) ? h("span.bs-privada", { title: "Não aparece no mural" }, ic("cadeado"), "privada") : null,
         destravado ? h("span.bs-selo-etapa", { estilo: { "--tom": et.tom } }, et.nome) : null,
         botaoRaio(i)
       ),
@@ -3291,6 +3455,7 @@ CI.views = (function () {
 
   function painelEnvio() {
     let natureza = bsNatureza;
+    let privada = false;   // escolha de quem publica; problema ignora e vai privado
 
     const fTitulo = entrada({
       class: "bs-titulo", placeholder: NATUREZAS[natureza].titulo, maxlength: 160,
@@ -3303,6 +3468,32 @@ CI.views = (function () {
        os mesmos, porque os dois seguem o mesmo caminho até virar projeto. */
     const botao = h("button.btn.btn-primario", { type: "button", onclick: () => enviar() });
     const escolha = h("div.bs-natureza", { role: "group", "aria-label": "O que você está trazendo" });
+
+    /* Quem publica decide se a ideia vai para o mural ou direto para o funil.
+       Problema não decide: entra privado sempre, e a tela diz isso em vez de
+       oferecer uma escolha que seria ignorada. */
+    const reserva = h("div.bs-reserva");
+
+    function pintarReserva() {
+      U.limpar(reserva);
+      const trancada = natureza === "problema";
+      reserva.classList.toggle("travada", trancada);
+
+      if (trancada) {
+        reserva.appendChild(ic("cadeado"));
+        reserva.appendChild(h("span.dica",
+          h("strong", "Todo problema entra em modo privado."),
+          " Não passa pelo mural: quem lê é só a equipe que cuida do funil."));
+        return;
+      }
+      reserva.appendChild(h("button.bs-trava" + (privada ? ".ativa" : ""), {
+        type: "button", role: "switch", "aria-checked": privada ? "true" : "false",
+        onclick: () => { privada = !privada; pintarReserva(); }
+      }, ic(privada ? "cadeado" : "destravar"), privada ? "Privada" : "Deixar privada"));
+      reserva.appendChild(h("span.dica", privada
+        ? "Não vai para o mural. Só a equipe do funil vê o que você escreveu."
+        : "Vai para o mural, com o seu nome, para a empresa toda ver e apoiar."));
+    }
 
     function pintarNatureza() {
       const n = NATUREZAS[natureza];
@@ -3321,6 +3512,7 @@ CI.views = (function () {
       botao.appendChild(h("span", n.verbo));
       botao.style.setProperty("--tom", n.tom);
       botao.classList.toggle("bs-enviar-problema", natureza === "problema");
+      pintarReserva();
     }
     const fDir = selecao([["", "Não sei ainda"], ...db.dados.diretorias.map(d => [d.id, d.nome])], { value: "" });
     const fAutor = entrada({ value: db.perfil?.nome && db.perfil.nome !== "Você" ? db.perfil.nome : "", placeholder: "Seu nome" });
@@ -3334,6 +3526,7 @@ CI.views = (function () {
         return;
       }
       const autor = fAutor.value.trim();
+      const reservado = natureza === "problema" || privada;
       try {
         await db.criar("ideias", {
           titulo,
@@ -3346,11 +3539,18 @@ CI.views = (function () {
           etapa: "atracao",
           ordem: ideiasDaEtapa("atracao").length,
           apoios: [],
-          arquivada: false
+          arquivada: false,
+          privada: reservado
         });
         if (autor) db.salvarPerfil({ nome: autor });
         fTitulo.value = ""; fDesc.value = "";
-        U.aviso(natureza === "problema" ? "Problema registrado" : "Ideia no ar", "ok", n.icone);
+        /* Quem manda algo privado precisa saber que chegou — senão parece que
+           sumiu, já que não aparece no mural logo abaixo. */
+        U.aviso(
+          reservado
+            ? (natureza === "problema" ? "Problema recebido — só o funil vê" : "Ideia guardada — só o funil vê")
+            : "Ideia no ar",
+          "ok", reservado ? "cadeado" : n.icone);
         fTitulo.focus();
       } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
     }
@@ -3378,6 +3578,7 @@ CI.views = (function () {
             campo("Diretoria", fDir),
             campo("Seu nome", fAutor)
           ),
+          reserva,
           h("div.bs-envio-pe",
             h("span.dica", "Não precisa estar resolvido nem pronto. Tudo entra em Atração " +
                            "e a equipe de inovação cuida do resto."),
@@ -3389,9 +3590,12 @@ CI.views = (function () {
   }
 
   function painelMural(destravado) {
-    const todas = ideiasVivas();
+    /* O mural é a parte aberta da aba: só entra aqui o que foi publicado sem
+       pedido de privacidade. Problemas nunca aparecem. */
+    const todas = ideiasPublicas();
+    const nPrivadas = ideiasVivas().length - todas.length;
 
-    let lista = bsNat === "tudo" ? todas.slice() : todas.filter(i => NAT(i).id === bsNat);
+    let lista = todas.slice();
     const tipos = ["Todos", ...TIPOS_IDEIA.filter(t => lista.some(i => i.tipo === t))];
     if (!tipos.includes(bsFiltro)) bsFiltro = "Todos";
     if (bsFiltro !== "Todos") lista = lista.filter(i => i.tipo === bsFiltro);
@@ -3399,16 +3603,6 @@ CI.views = (function () {
     lista.sort(bsOrdem === "apoios"
       ? (a, b) => apoios(b).length - apoios(a).length || String(b.criado_em).localeCompare(String(a.criado_em))
       : (a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
-
-    const porNatureza = [
-      { id: "tudo", nome: "Tudo", icone: null, tom: null },
-      { id: "ideia", nome: "Ideias", icone: "raio", tom: "var(--nuvem)" },
-      { id: "problema", nome: "Problemas", icone: "alerta", tom: "var(--warn)" }
-    ].map(o => h("button.bs-filtro.forte" + (bsNat === o.id ? ".marcado" : ""), {
-      type: "button", "aria-pressed": bsNat === o.id ? "true" : "false",
-      estilo: o.tom ? { "--tom": o.tom } : {},
-      onclick: () => { bsNat = o.id; CI.app.recarregarVista(); }
-    }, o.icone ? ic(o.icone) : null, o.nome));
 
     const filtros = tipos.map(t => h("button.bs-filtro", {
       type: "button", "aria-pressed": bsFiltro === t ? "true" : "false",
@@ -3427,15 +3621,19 @@ CI.views = (function () {
         h("div.acoes", ordenar)
       ),
       h("div.painel-bd",
-        h("div.bs-filtros", { estilo: { marginBottom: "9px" } }, ...porNatureza),
         tipos.length > 1
           ? h("div.bs-filtros", { estilo: { marginBottom: "13px" } }, ...filtros)
           : null,
         lista.length
           ? h("div.bs-mural", ...lista.map(i => cartaoIdeia(i, destravado)))
-          : U.vazio("tempestade",
-              bsNat === "problema" ? "Nenhum problema trazido" : "O mural está limpo",
-              "O primeiro registro da empresa começa no campo aí em cima.")
+          : U.vazio("tempestade", "O mural está limpo",
+              "A primeira ideia pública da empresa começa no campo aí em cima."),
+        nPrivadas
+          ? h("p.bs-reservado", ic("cadeado"),
+              h("span", `${nPrivadas} ${nPrivadas === 1 ? "registro está" : "registros estão"} em modo privado. ` +
+                        "Problemas e ideias marcadas como privadas não passam pelo mural — " +
+                        "vão direto para o funil, com quem cuida da inovação."))
+          : null
       )
     );
   }
@@ -3697,6 +3895,8 @@ CI.views = (function () {
   return {
     vInicio, vPainel, vCronograma, vProjetos, vProjeto, vDiretorias, vImplementacao,
     vIndicadores, vConfig, vBrainstorm,
-    modalProjeto, modalEtapa, gavetaEtapa, buscaGlobal
+    modalProjeto, modalEtapa, gavetaEtapa, buscaGlobal,
+    /* regras puras, expostas para poderem ser conferidas de fora */
+    veredito, ehPrivada
   };
 })();
