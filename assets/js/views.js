@@ -1745,6 +1745,26 @@ CI.views = (function () {
      ====================================================================== */
 
   function vIndicadores() {
+    /* Os indicadores medem o desempenho das diretorias. Número de desempenho
+       lido fora de contexto vira fofoca, então esta tela fica atrás da mesma
+       senha do funil. */
+    if (!areaAberta()) {
+      return h("div.view",
+        h("section.painel",
+          h("div.painel-hd", h("h2", "Indicadores"), h("div.acoes", chip("restrito"))),
+          h("div.painel-bd",
+            portao({
+              titulo: "Os indicadores são da diretoria",
+              texto: "Aqui ficam TIP, ISD, Inovação e o cumprimento de prazo por diretoria — " +
+                     "números de desempenho, que fazem sentido junto com o contexto de cada área. " +
+                     "É a mesma senha do funil, e fica destravado neste navegador depois da primeira vez.",
+              aviso: "Indicadores destravados neste navegador"
+            })
+          )
+        )
+      );
+    }
+
     const impl = db.dados.implementacoes;
     const implementados = impl.filter(i => i.status === "Implementado").length;
     const tip = impl.length ? Math.round((implementados / impl.length) * 100) : 0;
@@ -1935,7 +1955,9 @@ CI.views = (function () {
             : h("p.discreto", { estilo: { fontSize: "12.5px" } },
                 "Lance as notas do formulário de satisfação para o ISD sair do zero.")
         )
-      )
+      ),
+      h("div", { estilo: { display: "flex", justifyContent: "flex-end", marginTop: "14px" } },
+        botaoTrancar("Indicadores"))
     );
   }
 
@@ -2746,11 +2768,57 @@ CI.views = (function () {
     catch (err) { U.aviso("Não deu para registrar: " + err.message, "erro"); }
   }
 
-  function funilAberto() {
+  /* ---- áreas restritas ----------------------------------------------------
+     O funil e os indicadores usam a mesma senha e a mesma chave: destravar um
+     destrava o outro. Quem já tinha aberto o funil não precisa digitar de novo
+     — a chave guardada continua sendo "ci:funil".
+
+     Isto é uma cortina, não um cofre: esconde as telas de quem só quer usar o
+     site, mas quem souber mexer no navegador alcança os dados pela API. Para
+     fechar de verdade, a trava teria que estar no banco, por pessoa.
+     ---------------------------------------------------------------------- */
+
+  function areaAberta() {
     try { return localStorage.getItem("ci:funil") === "1"; } catch (_) { return false; }
   }
-  function guardarFunil(aberto) {
+  function guardarArea(aberto) {
     try { aberto ? localStorage.setItem("ci:funil", "1") : localStorage.removeItem("ci:funil"); } catch (_) {}
+  }
+
+  /** O cadeado, igual nas duas telas: título, explicação e campo de senha. */
+  function portao({ titulo, texto, aviso }) {
+    const fSenha = entrada({
+      type: "password", inputmode: "numeric", maxlength: 8, autocomplete: "off",
+      "aria-label": "Senha da área restrita",
+      onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); tentar(); } }
+    });
+    function tentar() {
+      if (fSenha.value.trim() !== SENHA_FUNIL) {
+        U.aviso("Senha incorreta.", "erro");
+        fSenha.value = ""; fSenha.focus();
+        return;
+      }
+      guardarArea(true);
+      U.aviso(aviso || "Destravado neste navegador", "ok");
+      CI.app.recarregarVista();
+    }
+    return h("div.bs-tranca",
+      ic("cadeado"),
+      h("h3", titulo),
+      h("p", texto),
+      h("div.bs-tranca-form",
+        fSenha,
+        h("button.btn.btn-primario", { type: "button", onclick: tentar }, ic("destravar"), "Destravar")
+      )
+    );
+  }
+
+  /** Botão de trancar de volta, para o rodapé das telas restritas. */
+  function botaoTrancar(oQue) {
+    return h("button.btn.btn-fantasma.btn-p", {
+      type: "button",
+      onclick: () => { guardarArea(false); U.aviso(`${oQue} trancado`, "info"); CI.app.recarregarVista(); }
+    }, ic("cadeado"), "Trancar");
   }
 
   /* ---- a nuvem carregada ---------------------------------------------------
@@ -3757,7 +3825,7 @@ CI.views = (function () {
   function gavetaIdeia(ideiaId) {
     const i = db.dados.ideias.find(x => x.id === ideiaId);
     if (!i) return;
-    const podeEditar = funilAberto();
+    const podeEditar = areaAberta();
     const nat = NAT(i);
     const et = ETAPA(i.etapa);
 
@@ -3974,36 +4042,18 @@ CI.views = (function () {
   }
 
   function painelFunil() {
-    if (!funilAberto()) {
-      const fSenha = entrada({
-        type: "password", inputmode: "numeric", maxlength: 8, autocomplete: "off",
-        "aria-label": "Senha do funil",
-        onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); tentar(); } }
-      });
-      function tentar() {
-        if (fSenha.value.trim() !== SENHA_FUNIL) {
-          U.aviso("Senha incorreta.", "erro");
-          fSenha.value = ""; fSenha.focus();
-          return;
-        }
-        guardarFunil(true);
-        U.aviso("Funil destravado neste navegador", "ok");
-        CI.app.recarregarVista();
-      }
+    if (!areaAberta()) {
       return h("section.painel",
         h("div.painel-hd", h("h2", "Funil de inovação"), h("div.acoes", chip("restrito"))),
         h("div.painel-bd",
-          h("div.bs-tranca",
-            ic("cadeado"),
-            h("h3", "O funil é da equipe de inovação"),
-            h("p", "Aqui as ideias e os problemas passam por atração, qualificação e " +
+          portao({
+            titulo: "O funil é da equipe de inovação",
+            texto: "Aqui as ideias e os problemas passam por atração, qualificação e " +
                    "fechamento até virarem projeto. Quem publica no mural não precisa ver " +
-                   "esta parte — e ela fica destravada neste navegador depois da primeira vez."),
-            h("div.bs-tranca-form",
-              fSenha,
-              h("button.btn.btn-primario", { type: "button", onclick: tentar }, ic("destravar"), "Destravar")
-            )
-          )
+                   "esta parte — e ela fica destravada neste navegador depois da primeira vez. " +
+                   "A mesma senha abre os Indicadores.",
+            aviso: "Funil destravado neste navegador"
+          })
         )
       );
     }
@@ -4043,10 +4093,7 @@ CI.views = (function () {
                 onclick: () => { bsArquivadas = !bsArquivadas; CI.app.recarregarVista(); }
               }, ic("caixa"), `${arquivadas.length} arquivada${arquivadas.length > 1 ? "s" : ""}`)
             : null,
-          h("button.btn.btn-fantasma.btn-p", {
-            type: "button", title: "Esconder o funil neste navegador",
-            onclick: () => { guardarFunil(false); U.aviso("Funil trancado", "info"); CI.app.recarregarVista(); }
-          }, ic("cadeado"), "Trancar")
+          botaoTrancar("Funil")
         )
       ),
       h("div.painel-bd.sem-pad", grade),
@@ -4067,7 +4114,7 @@ CI.views = (function () {
   }
 
   function vBrainstorm() {
-    const destravado = funilAberto();
+    const destravado = areaAberta();
     return h("div.view.view-brainstorm",
       ceuCarregado(),
       painelEnvio(),
