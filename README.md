@@ -47,11 +47,19 @@ O workflow está em `.github/workflows/deploy.yml`.
 
 ### 2.2 Criar as tabelas
 
-**SQL Editor → New query** → cole o conteúdo de `supabase/schema.sql` → **Run**.
+São **dois** arquivos, nesta ordem, um de cada vez:
 
-Isso cria tabelas, views, políticas de segurança (RLS), tempo real, os gatilhos que
-enfileiram e-mails e já insere as oito diretorias.
-Rodar o arquivo mais de uma vez é seguro.
+1. **SQL Editor → New query** → cole `supabase/schema.sql` → **Run**.
+   Cria tabelas, views, políticas de segurança (RLS), tempo real, os gatilhos que
+   enfileiram e-mails e já insere as oito diretorias.
+
+2. **New query** de novo → cole `supabase/atualizacoes.sql` → **Run**.
+   Acrescenta o Brainstorm (ideias e problemas), a privacidade dos registros e o
+   veredito automático de prazo. Sem este arquivo, a aba Brainstorm fica vazia e
+   não dá para adiar o prazo de uma etapa vencida.
+
+Os dois podem ser rodados mais de uma vez sem problema — só acrescentam, nunca
+apagam dado. O resultado esperado em ambos é "Success. No rows returned".
 
 ### 2.3 Pegar as chaves
 
@@ -223,6 +231,7 @@ assets/js/ui.js               DOM, ícones, avisos, modal, gaveta, datas
 assets/js/views.js            as telas
 assets/js/app.js              casca, navegação e arranque
 supabase/schema.sql           tabelas, views, RLS, gatilhos, agendamentos
+supabase/atualizacoes.sql     brainstorm, privacidade e veredito de prazo
 supabase/functions/           Edge Functions (Resend)
 .github/workflows/deploy.yml  publicação automática
 ```
@@ -288,6 +297,7 @@ Os indicadores da planilha viraram a view `vw_indicadores`:
 | Fica em "Modo local" mesmo com as chaves | URL sem `https://` ou chave incompleta. Confira em **Conexão**. |
 | "Conectando…" e o portão de login não sai | e-mail ainda não confirmado, ou a URL não está em *Redirect URLs*. |
 | Login funciona mas nada aparece | o `schema.sql` não rodou até o fim — rode de novo. |
+| Brainstorm vazio, ou aviso de banco desatualizado | falta rodar o `atualizacoes.sql`. |
 | Não chega e-mail | `RESEND_API_KEY` ausente, domínio não verificado, ou a etapa está sem e-mail do responsável. Veja **Edge Functions → Logs**. |
 | Erro ao apagar um projeto | por padrão só `admin` e `gestor` apagam projetos. Mude o `papel` na tabela `perfis`. |
 
