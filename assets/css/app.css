@@ -1460,6 +1460,172 @@ table.tabela tbody tr:last-child td { border-bottom: 0; }
   .prazo-placar { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
 
+/* --- aviso de prazos, no alto do Início ----------------------------------
+   É a primeira coisa da página: o que está atrasado e o que vence esta
+   semana, antes do título e da animação. Some sozinho quando não há nada
+   apertado — aviso que aparece todo dia sem motivo deixa de ser lido. */
+.aviso-prazos { margin-bottom: 20px; border-color: color-mix(in srgb, var(--crit) 26%, var(--line)); }
+.aviso-prazos.tranquilo { border-color: var(--line); }
+.aviso-prazos .painel-bd { display: flex; flex-direction: column; gap: 16px; }
+
+.prazo-faixa { display: flex; flex-direction: column; gap: 6px; }
+.prazo-faixa-hd {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-bottom: 7px; border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.prazo-faixa-hd svg { width: 14px; height: 14px; flex: none; }
+.prazo-faixa-hd strong { font: 700 12.5px var(--f-ui); color: var(--txt-2); }
+.prazo-faixa-hd .rotulo { font-size: 10px; }
+.prazo-faixa-hd.crit { color: var(--crit); }
+.prazo-faixa-hd.crit strong { color: var(--crit); }
+.prazo-faixa-hd.warn { color: var(--warn); }
+.prazo-faixa-hd.warn strong { color: var(--warn); }
+.prazo-conta {
+  margin-left: auto; flex: none;
+  min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--raise); color: var(--txt-2);
+  font: 700 10.5px/1 var(--f-dado);
+}
+.prazo-faixa-hd.crit .prazo-conta { background: color-mix(in srgb, var(--crit) 18%, transparent); color: var(--crit); }
+.prazo-faixa-hd.warn .prazo-conta { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+
+.prazo-lista { display: flex; flex-direction: column; }
+.prazo-linha {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 3px minmax(0, 1.1fr) minmax(0, 1.6fr) minmax(0, .8fr) auto;
+  width: 100%; padding: 8px 8px 8px 0; border: 0; border-radius: var(--r-sm);
+  background: none; cursor: pointer; text-align: left;
+  border-bottom: 1px solid var(--line-soft);
+  transition: background .13s ease;
+}
+.prazo-linha:last-child { border-bottom: 0; }
+.prazo-linha:hover { background: var(--raise); }
+.prazo-linha:focus-visible { outline: none; box-shadow: var(--anel); }
+.prazo-fita { width: 3px; height: 22px; border-radius: 2px; display: block; }
+.prazo-proj  { font: 600 12.5px var(--f-ui); color: var(--txt); }
+.prazo-etapa { font-size: 12px; color: var(--txt-2); }
+.prazo-resp  { font-size: 11.5px; color: var(--faint); }
+.prazo-quando {
+  flex: none; font: 700 11px var(--f-dado); color: var(--muted);
+  letter-spacing: .02em; text-align: right; white-space: nowrap;
+}
+.prazo-faixa-hd.crit ~ .prazo-lista .prazo-quando { color: var(--crit); }
+.prazo-faixa-hd.warn ~ .prazo-lista .prazo-quando { color: var(--warn); }
+
+.prazo-calmo { display: flex; gap: 11px; align-items: flex-start; }
+.prazo-calmo svg { width: 17px; height: 17px; flex: none; color: var(--ok); margin-top: 1px; }
+.prazo-calmo strong { font: 600 13.5px var(--f-ui); color: var(--txt); }
+
+/* No celular a linha vira duas: projeto e prazo em cima, etapa embaixo. */
+@media (max-width: 720px) {
+  .prazo-linha {
+    grid-template-columns: 3px minmax(0, 1fr) auto;
+    grid-template-areas: "fita proj quando" "fita etapa etapa" "fita resp resp";
+    row-gap: 2px;
+  }
+  .prazo-fita   { grid-area: fita; height: 100%; }
+  .prazo-proj   { grid-area: proj; }
+  .prazo-quando { grid-area: quando; }
+  .prazo-etapa  { grid-area: etapa; }
+  .prazo-resp   { grid-area: resp; }
+}
+
+/* --- calendário de calendarização ---------------------------------------
+   Sete colunas de largura igual e células quadradas, para o mês ser lido de
+   relance como um mês — e não como uma lista. O dia é um botão: ele é a
+   decisão inteira dessa tela. */
+.cal-topo {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 14px;
+}
+.cal-mes {
+  font: 700 15px var(--f-display); letter-spacing: -.01em;
+  color: var(--txt); min-width: 11ch; text-align: center;
+}
+/* "abril de 2027" vira "Abril de 2027" — capitalize deixaria o "De" maiúsculo */
+.cal-mes::first-letter { text-transform: uppercase; }
+.cal-grade {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px;
+}
+.cal-cab {
+  font: 600 10px/1 var(--f-dado); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); text-align: center; padding-bottom: 5px;
+}
+.cal-dia {
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  aspect-ratio: 1 / .92; min-height: 44px; padding: 5px 6px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--panel-2); color: var(--txt-2);
+  font: 500 12.5px var(--f-ui); text-align: left; cursor: pointer;
+  transition: border-color .13s ease, background .13s ease, transform .13s ease;
+}
+.cal-dia:hover { border-color: var(--accent-line); background: var(--raise); transform: translateY(-1px); }
+.cal-dia:focus-visible { outline: none; box-shadow: var(--anel); }
+.cal-n { font-variant-numeric: tabular-nums; }
+
+/* dias que só fecham a grade: visíveis, mas fora da conversa */
+span.cal-dia.fora {
+  border-color: transparent; background: none; color: var(--faint);
+  opacity: .35; cursor: default; transform: none;
+}
+
+.cal-dia.passado { opacity: .62; }
+.cal-dia.dentro { background: color-mix(in srgb, var(--accent) 7%, var(--panel-2)); }
+.cal-dia.hoje {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cal-dia.hoje .cal-n { color: var(--accent); font-weight: 700; }
+.cal-dia.ocupado { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+
+/* A etapa em aberto é laranja (tem trabalho); a concluída é verde. Mesma
+   leitura de cor do resto da Central. */
+.cal-etapas { display: flex; flex-wrap: wrap; gap: 3px; margin-top: auto; }
+.cal-etapa, .cal-mais {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 15px; padding: 0 4px; border-radius: 4px;
+  font: 600 9.5px/1 var(--f-dado); font-style: normal;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer;
+}
+.cal-etapa.feita { background: var(--ok); color: #05130C; }
+.cal-etapa:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cal-mais { background: none; color: var(--faint); cursor: default; }
+
+.cal-resumo {
+  margin-top: 13px; font: 500 11.5px var(--f-dado); color: var(--muted);
+  letter-spacing: .02em;
+}
+.cal-dica, .etapa-dia {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-top: 10px; padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px; line-height: 1.55; color: var(--faint);
+}
+.cal-dica svg, .etapa-dia svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.cal-dica strong, .etapa-dia strong { color: var(--txt-2); font-weight: 600; }
+
+/* o dia escolhido, confirmado no topo do card da etapa */
+.etapa-dia {
+  margin: 0 0 16px; padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--txt-2); font-size: 12.5px;
+}
+.etapa-dia svg { color: var(--accent); margin-top: 1px; }
+
+@media (max-width: 560px) {
+  .cal-grade { gap: 3px; }
+  .cal-dia { min-height: 38px; padding: 3px 4px; font-size: 11.5px; }
+  .cal-mes { font-size: 14px; min-width: 9ch; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-dia:hover { transform: none; }
+}
+
 /* --- escolha de privacidade ---
    Fica entre os campos e o botão, no caminho do olho de quem vai publicar: é a
    última decisão antes de mandar, e a mais difícil de desfazer. */
