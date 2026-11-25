@@ -258,6 +258,49 @@ CI.db = (function () {
     }
   }
 
+  /* ---- colunas novas que o banco pode ainda não ter ----------------------
+     O site evolui mais rápido que o banco: alguém publica a versão nova dos
+     arquivos antes de rodar o SQL correspondente. Sem isto, o PostgREST
+     recusa a gravação inteira por causa de uma coluna que falta, e a pessoa
+     fica sem conseguir nem mudar uma data — um erro grande para uma causa
+     pequena. Aqui a gravação cai de pé: tenta de novo sem as colunas novas,
+     avisa uma vez o que falta rodar, e o resto continua funcionando.
+     ---------------------------------------------------------------------- */
+
+  const COLUNAS_NOVAS = {
+    etapas: { campos: ["prazo_original", "repactuada_em"], sql: "supabase/atualizacoes.sql" },
+    ideias: { campos: ["privada"], sql: "supabase/atualizacoes.sql" }
+  };
+  const jaAvisei = new Set();
+
+  /** O erro é de coluna que não existe? Devolve o nome dela, ou null. */
+  function colunaFaltando(erro, tabela) {
+    const msg = String(erro?.message || "");
+    if (!/column|coluna|schema cache|PGRST204/i.test(msg)) return null;
+    const conhecidas = COLUNAS_NOVAS[tabela]?.campos || [];
+    return conhecidas.find(c => msg.includes(c)) || null;
+  }
+
+  function semColunasNovas(tabela, dados) {
+    const campos = COLUNAS_NOVAS[tabela]?.campos || [];
+    const limpo = Object.assign({}, dados);
+    let tirou = false;
+    campos.forEach(c => { if (c in limpo) { delete limpo[c]; tirou = true; } });
+    return tirou ? limpo : null;
+  }
+
+  function avisarSQL(tabela) {
+    const info = COLUNAS_NOVAS[tabela];
+    if (!info || jaAvisei.has(tabela)) return;
+    jaAvisei.add(tabela);
+    const aviso = window.CI?.ui?.aviso;
+    if (aviso) {
+      aviso(`Salvo, mas o banco está desatualizado: rode ${info.sql} no SQL Editor do Supabase.`, "alerta");
+    } else {
+      console.warn(`[Central] Falta rodar ${info.sql} no Supabase (tabela ${tabela}).`);
+    }
+  }
+
   /* ---- CRUD ------------------------------------------------------------- */
 
   api.criar = async function (tabela, registro) {
@@ -266,7 +309,14 @@ CI.db = (function () {
     if (api.motor === "supabase") {
       const envio = Object.assign({}, registro);
       delete envio.id;
-      const { data, error } = await api.sb.from(tabela).insert(envio).select().single();
+      let { data, error } = await api.sb.from(tabela).insert(envio).select().single();
+      if (error && colunaFaltando(error, tabela)) {
+        const reduzido = semColunasNovas(tabela, envio);
+        if (reduzido) {
+          ({ data, error } = await api.sb.from(tabela).insert(reduzido).select().single());
+          if (!error) avisarSQL(tabela);
+        }
+      }
       if (error) throw new Error(error.message);
       const lista = api.dados[tabela] || (api.dados[tabela] = []);
       if (!lista.some(r => r.id === data.id)) lista.push(data);
@@ -288,7 +338,14 @@ CI.db = (function () {
       const anterior = i >= 0 ? Object.assign({}, lista[i]) : null;
       if (i >= 0) lista[i] = Object.assign({}, lista[i], mudancas);   // otimista
       api.emitir();
-      const { data, error } = await api.sb.from(tabela).update(mudancas).eq("id", id).select().single();
+      let { data, error } = await api.sb.from(tabela).update(mudancas).eq("id", id).select().single();
+      if (error && colunaFaltando(error, tabela)) {
+        const reduzido = semColunasNovas(tabela, mudancas);
+        if (reduzido && Object.keys(reduzido).length) {
+          ({ data, error } = await api.sb.from(tabela).update(reduzido).eq("id", id).select().single());
+          if (!error) avisarSQL(tabela);
+        }
+      }
       if (error) {
         if (i >= 0 && anterior) lista[i] = anterior;                  // desfaz
         api.emitir();

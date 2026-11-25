@@ -25,9 +25,12 @@ CI.views = (function () {
   function estat(projetoId) {
     const etapas = db.etapasDe(projetoId);
     const feitas = etapas.filter(e => e.concluida).length;
-    const atrasadas = etapas.filter(e => !e.concluida && e.data_entrega && U.diasAte(e.data_entrega) < 0).length;
-    const pendentes = etapas.filter(e => !e.concluida && e.data_entrega);
-    pendentes.sort((a, b) => String(a.data_entrega).localeCompare(String(b.data_entrega)));
+    /* Mesma régua do resto da Central: etapaAtrasada respeita o prazo_original,
+       então uma etapa repactuada não some da contagem aqui enquanto continua
+       marcada como não entregue na trilha. */
+    const atrasadas = etapas.filter(etapaAtrasada).length;
+    const pendentes = etapas.filter(e => !e.concluida && prazoQueVale(e));
+    pendentes.sort((a, b) => String(prazoQueVale(a)).localeCompare(String(prazoQueVale(b))));
     return {
       total: etapas.length, feitas, atrasadas,
       pct: etapas.length ? Math.round((feitas / etapas.length) * 100) : 0,
@@ -182,18 +185,46 @@ CI.views = (function () {
 
   const prazoQueVale = e => e.prazo_original || e.data_entrega;
 
+  /* Adiar um prazo que JÁ venceu guarda a data antiga. Vale para todo caminho
+     que mexe na data de entrega — a gaveta, o formulário de edição e o
+     calendário —, senão bastaria editar pelo lugar errado para a falha
+     desaparecer do histórico. */
+  function camposDeRepactuacao(etapa, novaData) {
+    const antiga = etapa?.data_entrega || null;
+    if (!antiga) return {};
+    if (String(antiga) === String(novaData ?? "")) return {};
+    if (etapa.prazo_original) return {};            // já registrado antes
+    if (etapa.concluida) return {};                 // entregue: nada a repactuar
+    if (U.diasAte(antiga) >= 0) return {};          // ainda não tinha vencido
+    return { prazo_original: antiga, repactuada_em: new Date().toISOString() };
+  }
+
   const VEREDITOS = {
     "no-prazo":      { nome: "No prazo",      tom: "ok",   icone: "check"  },
     "fora-do-prazo": { nome: "Fora do prazo", tom: "warn", icone: "alerta" },
     "nao-entregue":  { nome: "Não entregue",  tom: "crit", icone: "alerta" }
   };
 
+  /* `concluida_em` é um instante (ISO, em UTC); `data_entrega` é uma data do
+     calendário, sem hora. Comparar os dois pelo texto do ISO erra no Brasil:
+     às 21h de Brasília o UTC já virou o dia seguinte, e quem entregou no
+     próprio dia do prazo aparecia como atrasado. Converte-se o instante para
+     o dia LOCAL de quem está olhando antes de comparar. */
+  function diaLocalDe(instante) {
+    if (!instante) return null;
+    const d = new Date(instante);
+    if (isNaN(d.getTime())) return String(instante).slice(0, 10);
+    return [d.getFullYear(),
+            String(d.getMonth() + 1).padStart(2, "0"),
+            String(d.getDate()).padStart(2, "0")].join("-");
+  }
+
   function veredito(e) {
-    const prazo = prazoQueVale(e);
+    const prazo = String(prazoQueVale(e) || "").slice(0, 10);
     if (!prazo) return "sem-prazo";               // nada combinado, nada a cobrar
     if (e.concluida) {
       if (!e.concluida_em) return "no-prazo";     // concluída antes de guardarmos a data
-      return e.concluida_em.slice(0, 10) <= prazo ? "no-prazo" : "fora-do-prazo";
+      return diaLocalDe(e.concluida_em) <= prazo ? "no-prazo" : "fora-do-prazo";
     }
     return U.diasAte(prazo) < 0 ? "nao-entregue" : "em-dia";
   }
@@ -825,7 +856,7 @@ CI.views = (function () {
       h("div", { estilo: { display: "flex", gap: "7px", alignItems: "center", flexWrap: "wrap" } },
         botaoSeguir(p),
         h("button.btn", { type: "button", onclick: () => modalProjeto(p) }, ic("lapis"), "Editar"),
-        h("button.btn.btn-primario", { type: "button", onclick: () => modalEtapa(p.id) }, ic("mais"), "Nova etapa")
+        h("button.btn.btn-primario", { type: "button", onclick: () => modalCalendario(p.id) }, ic("cronograma"), "Calendarizar")
       )
     );
 
@@ -894,7 +925,7 @@ CI.views = (function () {
               type: "checkbox", checked: mostrarConcluidas,
               onchange: e => { mostrarConcluidas = e.target.checked; CI.app.recarregarVista(); }
             }), "mostrar concluídas"),
-          h("button.btn.btn-p", { type: "button", onclick: () => modalEtapa(p.id) }, ic("mais"), "Etapa")
+          h("button.btn.btn-p", { type: "button", onclick: () => modalCalendario(p.id) }, ic("cronograma"), "Etapa")
         )
       ),
       etapas.length > 1
@@ -907,7 +938,7 @@ CI.views = (function () {
           ? trilhaOrdenavel(p, etapas)
           : U.vazio("cronograma", "Nenhuma etapa ainda",
               "Quebre o projeto em entregas com responsável e data. É isso que alimenta o cronograma e os avisos por e-mail.",
-              h("button.btn.btn-primario", { type: "button", onclick: () => modalEtapa(p.id) }, ic("mais"), "Criar primeira etapa"))
+              h("button.btn.btn-primario", { type: "button", onclick: () => modalCalendario(p.id) }, ic("cronograma"), "Marcar a primeira entrega"))
       )
     );
 
@@ -1163,11 +1194,7 @@ CI.views = (function () {
     const salvarPrazo = async (nova) => {
       const antiga = e.data_entrega || null;
       if (String(antiga ?? "") === String(nova ?? "")) return;
-      const extra = {};
-      if (!e.prazo_original && antiga && !e.concluida && U.diasAte(antiga) < 0) {
-        extra.prazo_original = antiga;
-        extra.repactuada_em = new Date().toISOString();
-      }
+      const extra = camposDeRepactuacao(e, nova);
       try {
         await db.atualizar("etapas", e.id, Object.assign({ data_entrega: nova }, extra));
         e.data_entrega = nova;
@@ -1409,12 +1436,152 @@ CI.views = (function () {
     });
   }
 
-  function modalEtapa(projetoId, etapa) {
+  /* ---- calendarizar -------------------------------------------------------
+     Marcar as entregas de um projeto é um ato espacial: você olha o mês,
+     vê onde já tem coisa, e escolhe um dia com folga. Um campo de data não
+     mostra nada disso — por isso a etapa começa aqui, no calendário, e o
+     formulário vem depois, já com o dia escolhido.
+     ---------------------------------------------------------------------- */
+
+  const SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+  const isoDe = (ano, mes, dia) =>
+    `${ano}-${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+
+  function modalCalendario(projetoId) {
+    const p = db.projeto(projetoId);
+    const hoje = U.hojeISO();
+
+    /* Abre no mês que interessa: se o projeto ainda não começou, no mês de
+       início; se já está em andamento, no mês de hoje. */
+    const comecaDepois = p?.inicio && U.diasAte(p.inicio) > 0;
+    const base = U.paraData(comecaDepois ? p.inicio : hoje) || new Date();
+    let ano = base.getFullYear();
+    let mes = base.getMonth();
+
+    const rotuloMes = h("strong.cal-mes");
+    const grade = h("div.cal-grade");
+    const resumo = h("p.cal-resumo");
+
+    function irPara(delta) {
+      const d = new Date(ano, mes + delta, 1);
+      ano = d.getFullYear(); mes = d.getMonth();
+      pintar();
+    }
+
+    function abrirDia(data) {
+      U.fecharModal(true);
+      modalEtapa(projetoId, null, { data, voltarPara: () => modalCalendario(projetoId) });
+    }
+
+    function pintar() {
+      const etapas = db.etapasDe(projetoId);
+      rotuloMes.textContent = `${U.MESES[mes]} de ${ano}`;
+      U.limpar(grade);
+
+      SEMANA.forEach(d => grade.appendChild(h("span.cal-cab", d)));
+
+      const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+      const antes = new Date(ano, mes, 1).getDay();        // 0 = domingo
+      const noMesAnterior = new Date(ano, mes, 0).getDate();
+
+      // fecha a primeira semana com os dias do mês anterior, apagados
+      for (let i = antes; i > 0; i--) {
+        grade.appendChild(h("span.cal-dia.fora", String(noMesAnterior - i + 1)));
+      }
+
+      let marcadasNoMes = 0;
+
+      for (let d = 1; d <= diasNoMes; d++) {
+        const data = isoDe(ano, mes, d);
+        const doDia = etapas.filter(e => String(e.data_entrega || "").slice(0, 10) === data);
+        marcadasNoMes += doDia.length;
+
+        const dentro = p?.inicio && p?.termino && data >= p.inicio && data <= p.termino;
+        const classes = ".cal-dia" +
+          (data === hoje ? ".hoje" : "") +
+          (data < hoje ? ".passado" : "") +
+          (dentro ? ".dentro" : "") +
+          (doDia.length ? ".ocupado" : "");
+
+        const celula = h("button" + classes, {
+          type: "button",
+          title: doDia.length
+            ? `${U.dataBR(data)} — ${doDia.length} etapa${doDia.length > 1 ? "s" : ""} marcada${doDia.length > 1 ? "s" : ""}`
+            : `Marcar uma entrega em ${U.dataBR(data)}`,
+          onclick: ev => { if (!ev.target.closest(".cal-etapa")) abrirDia(data); }
+        },
+          h("span.cal-n", String(d)),
+          doDia.length
+            ? h("span.cal-etapas", ...doDia.slice(0, 3).map(e => h("i.cal-etapa" + (e.concluida ? ".feita" : ""), {
+                title: `Etapa ${e.numero}: ${e.descricao || "sem descrição"}`,
+                onclick: ev => {
+                  ev.stopPropagation();
+                  U.fecharModal(true);
+                  modalEtapa(projetoId, e, { voltarPara: () => modalCalendario(projetoId) });
+                }
+              }, String(e.numero))),
+              doDia.length > 3 ? h("i.cal-mais", `+${doDia.length - 3}`) : null)
+            : null
+        );
+        grade.appendChild(celula);
+      }
+
+      // completa a última semana, para a grade não ficar torta
+      const preenchidas = antes + diasNoMes;
+      const sobra = (7 - (preenchidas % 7)) % 7;
+      for (let i = 1; i <= sobra; i++) grade.appendChild(h("span.cal-dia.fora", String(i)));
+
+      const semData = etapas.filter(e => !e.data_entrega).length;
+      resumo.textContent = [
+        marcadasNoMes
+          ? `${marcadasNoMes} entrega${marcadasNoMes > 1 ? "s" : ""} neste mês`
+          : "Nenhuma entrega marcada neste mês",
+        `${etapas.length} etapa${etapas.length === 1 ? "" : "s"} no projeto`,
+        semData ? `${semData} ainda sem data` : null
+      ].filter(Boolean).join(" · ");
+    }
+
+    pintar();
+
+    U.abrirModal({
+      sub: "Calendarizar",
+      titulo: p?.nome || "Projeto",
+      largura: 620,
+      corpo: [
+        h("div.cal-topo",
+          h("button.btn.btn-fantasma.btn-icone.btn-p", {
+            type: "button", "aria-label": "Mês anterior", onclick: () => irPara(-1)
+          }, ic("setaEsq")),
+          rotuloMes,
+          h("button.btn.btn-fantasma.btn-icone.btn-p", {
+            type: "button", "aria-label": "Próximo mês", onclick: () => irPara(1)
+          }, ic("setaDir")),
+          h("button.btn.btn-p", {
+            type: "button", estilo: { marginLeft: "auto" },
+            onclick: () => { const d = new Date(); ano = d.getFullYear(); mes = d.getMonth(); pintar(); }
+          }, "Hoje")
+        ),
+        grade,
+        resumo,
+        h("p.cal-dica", ic("cronograma"),
+          h("span", "Clique num dia para marcar uma entrega. ",
+            p?.inicio && p?.termino
+              ? h("span", "A faixa iluminada é a janela do projeto: ",
+                  h("strong", `${U.dataBR(p.inicio)} a ${U.dataBR(p.termino)}`), ".")
+              : h("span", "Defina início e término do projeto para ver a janela destacada aqui.")))
+      ],
+      acoes: [
+        h("button.btn", { type: "button", onclick: () => U.fecharModal() }, "Fechar")
+      ]
+    });
+  }
+
+  function modalEtapa(projetoId, etapa, opcoes = {}) {
     const editando = Boolean(etapa);
     const existentes = db.etapasDe(projetoId);
     const e = etapa || {
       numero: existentes.length + 1, descricao: "", responsavel: "",
-      responsavel_email: "", data_entrega: ""
+      responsavel_email: "", data_entrega: opcoes.data || ""
     };
 
     const fNumero = entrada({ type: "number", step: "0.5", value: e.numero, estilo: { maxWidth: "110px" } });
@@ -1423,11 +1590,19 @@ CI.views = (function () {
     const fEmail = entrada({ type: "email", value: e.responsavel_email || "", placeholder: "nome@adecon.com.br" });
     const fData = entrada({ type: "date", value: (e.data_entrega || "").slice(0, 10) });
 
+    const voltar = typeof opcoes.voltarPara === "function" ? opcoes.voltarPara : null;
+
     U.abrirModal({
       sub: editando ? "Editar etapa" : "Nova etapa",
       titulo: db.projeto(projetoId)?.nome || "Projeto",
       largura: 560,
       corpo: [
+        /* Vindo do calendário, o dia escolhido abre o card: confirma a escolha
+           sem obrigar a reler o campo de data lá embaixo. */
+        !editando && opcoes.data
+          ? h("p.etapa-dia", ic("cronograma"),
+              h("span", "Entrega em ", h("strong", U.dataExtenso(opcoes.data)), ". Dá para mudar abaixo."))
+          : null,
         h("div.linha-campos",
           campo("Nº", fNumero),
           campo("Data de entrega", fData)
@@ -1450,26 +1625,48 @@ CI.views = (function () {
               }
             }, ic("lixeira"), "Excluir")
           : null,
-        h("button.btn", { type: "button", onclick: () => U.fecharModal() }, "Cancelar"),
+        h("button.btn", {
+          type: "button",
+          onclick: () => { U.fecharModal(true); if (voltar) voltar(); else U.fecharModal(); }
+        }, voltar ? ic("setaEsq") : null, voltar ? "Voltar ao calendário" : "Cancelar"),
         h("button.btn.btn-primario", {
           type: "button",
           onclick: async () => {
             if (!fDesc.value.trim()) { U.aviso("Descreva a etapa.", "alerta"); fDesc.focus(); return; }
+            /* Nº em branco: editando, mantém o que a etapa já tinha — zerar o
+               campo não deveria jogar a etapa para o fim da lista. */
+            const numeroDigitado = Number(fNumero.value);
+            const numero = Number.isFinite(numeroDigitado) && fNumero.value.trim() !== ""
+              ? numeroDigitado
+              : (editando ? e.numero : existentes.length + 1);
             const dados = {
               projeto_id: projetoId,
-              numero: Number(fNumero.value) || existentes.length + 1,
+              numero,
               descricao: fDesc.value.trim(),
               responsavel: fResp.value.trim(),
               responsavel_email: fEmail.value.trim() || null,
               data_entrega: fData.value || null,
               ordem: editando ? (e.ordem ?? 0) : existentes.length
             };
+            /* Mudar a data por aqui segue a mesma regra da gaveta: se o prazo
+               antigo já tinha vencido, ele fica registrado. Sem isto, bastava
+               editar pelo lugar errado para a falha sumir do histórico. */
+            const repactuou = editando ? camposDeRepactuacao(e, dados.data_entrega) : {};
+            Object.assign(dados, repactuou);
             try {
-              if (editando) { await db.atualizar("etapas", e.id, dados); U.aviso("Etapa atualizada", "ok"); }
+              if (editando) {
+                await db.atualizar("etapas", e.id, dados);
+                U.aviso(repactuou.prazo_original
+                  ? `Prazo adiado. ${U.dataBR(repactuou.prazo_original)} fica registrado como não entregue.`
+                  : "Etapa atualizada", repactuou.prazo_original ? "alerta" : "ok");
+              }
               else { await db.criar("etapas", Object.assign({ concluida: false }, dados)); U.aviso("Etapa criada", "ok"); }
               if (dados.responsavel_email) db.dispararEmails();
-              U.fecharModal();
               CI.app.recarregarVista();
+              /* Quem veio calendarizar quase nunca marca uma etapa só: volta
+                 para o mês, com a entrega recém-criada já no lugar. */
+              U.fecharModal(true);
+              if (voltar) voltar(); else U.fecharModal();
             } catch (err) { U.aviso("Não salvou: " + err.message, "erro"); }
           }
         }, ic("check"), editando ? "Salvar" : "Adicionar etapa")
@@ -2257,7 +2454,11 @@ CI.views = (function () {
       linhas.push(csvLinha([e.numero, e.descricao, e.responsavel, e.responsavel_email,
         e.data_entrega ? U.dataBR(e.data_entrega) : "",
         e.prazo_original ? U.dataBR(e.prazo_original) : "",
-        PALAVRA[v] || v, furouPrazo(e) ? "NÃO" : "SIM",
+        /* Só responde SIM/NÃO quando há veredito. Etapa sem data e etapa que
+           ainda não venceu saíam como "SIM", o que dava uma taxa de
+           cumprimento inflada para quem somasse a coluna na planilha. */
+        PALAVRA[v] || v,
+        v === "sem-prazo" ? "—" : v === "em-dia" ? "ainda no prazo" : (furouPrazo(e) ? "NÃO" : "SIM"),
         e.concluida ? "SIM" : "NÃO", e.observacao, e.anotacoes, e.arquivo_url]));
     });
     baixar(`${p.nome.replace(/[^\w\-]+/g, "_")}.csv`, "﻿" + linhas.join("\n"), "text/csv;charset=utf-8");
@@ -2272,8 +2473,31 @@ CI.views = (function () {
     baixar("central-inovacao-etapas.csv", "﻿" + linhas.join("\n"), "text/csv;charset=utf-8");
   }
 
+  /* O despejo completo levava junto os registros privados em texto puro, de
+     uma tela sem trava: era a porta dos fundos do mural. Sem a senha, o que
+     sai é o backup sem eles — e o arquivo diz quantos ficaram de fora, para
+     ninguém achar que tem uma cópia completa quando não tem. */
   function exportarJSON() {
-    baixar("central-inovacao.json", JSON.stringify(db.dados, null, 2), "application/json");
+    const aberto = areaAberta();
+    const dados = Object.assign({}, db.dados);
+    let reservados = 0;
+
+    if (!aberto) {
+      const todas = Array.isArray(db.dados.ideias) ? db.dados.ideias : [];
+      const publicas = todas.filter(i => !ehPrivada(i));
+      reservados = todas.length - publicas.length;
+      dados.ideias = publicas;
+      dados.__aviso = reservados
+        ? `${reservados} registro(s) privado(s) foram omitidos. Destrave o funil com a senha e exporte de novo para incluí-los.`
+        : "Exportado sem a senha do funil: registros privados, se houver, ficam de fora.";
+    }
+
+    baixar(aberto ? "central-inovacao.json" : "central-inovacao-publico.json",
+           JSON.stringify(dados, null, 2), "application/json");
+
+    if (reservados) {
+      U.aviso(`${reservados} registro(s) privado(s) ficaram fora do arquivo.`, "alerta", "cadeado");
+    }
   }
 
   function importarJSON() {
@@ -2439,22 +2663,21 @@ CI.views = (function () {
       const giro = (t / DUR_CICLO) * Math.PI * 2;
       const pontos = NOS.map((_, i) => posicao(i, giro));
 
-      /* trilho do anel */
-      ctx.strokeStyle = C.linha;
+      /* Trilho do anel, desenhado em pedaços para a frente ficar mais clara
+         que o fundo. Uma elipse só, com profundidade — no lugar dos oito raios
+         permanentes que cruzavam o meio e competiam com as conexões, que são o
+         que de fato tem o que dizer. */
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.ellipse(CX, CY, RX, RY, 0, 0, Math.PI * 2);
-      ctx.stroke();
-
-      /* raios até o núcleo */
-      pontos.forEach((p, i) => {
-        ctx.strokeStyle = comAlfa(NOS[i].tom, .08 + p.frente * .13);
-        ctx.lineWidth = 1;
+      const FATIAS = 72;
+      for (let s = 0; s < FATIAS; s++) {
+        const a0 = (s / FATIAS) * Math.PI * 2;
+        const a1 = ((s + 1) / FATIAS) * Math.PI * 2;
+        const frente = (Math.sin((a0 + a1) / 2) + 1) / 2;
+        ctx.strokeStyle = comAlfa(C.fraco, .10 + frente * .20);
         ctx.beginPath();
-        ctx.moveTo(CX, CY);
-        ctx.lineTo(p.x, p.y);
+        ctx.ellipse(CX, CY, RX, RY, 0, a0, a1);
         ctx.stroke();
-      });
+      }
 
       /* conexões acesas */
       const brilho = new Array(NOS.length).fill(0);
@@ -2565,13 +2788,58 @@ CI.views = (function () {
         ctx.beginPath(); ctx.arc(p.x, p.y, r - 2.9 * k, 0, 7); ctx.fill();
         ctx.fillStyle = comAlfa(n.tom, .6 + f * .4);
         ctx.beginPath(); ctx.arc(p.x, p.y, r - 5 * k, 0, 7); ctx.fill();
-
-        const lx = CX + (RX + 26 * k) * Math.cos(p.a);
-        const ly = CY + (RY + 19 * k) * Math.sin(p.a);
-        ctx.font = `600 ${((8.4 + f * 1.6) * k).toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
-        ctx.fillStyle = comAlfa(b > .3 ? n.tom : C.muted, .35 + f * .45 + b * .2);
-        ctx.fillText(n.sigla, lx, ly);
       });
+
+      /* --- rótulos ----------------------------------------------------------
+         Antes a sigla era jogada numa elipse maior e sempre centralizada no
+         ponto: perto do topo e da base do anel os nós se aproximam em x, e as
+         siglas acabavam empilhadas umas sobre as outras.
+
+         Agora cada sigla sai do próprio nó, empurrada para fora, e é ancorada
+         pelo lado — à esquerda do anel o texto termina no nó, à direita começa
+         nele, e só nos polos fica centralizado. Depois uma passada de cima
+         para baixo afasta quem ainda tiver ficado por cima de quem. É tudo
+         função de t, então o laço continua fechando igual. */
+      const LETRA = f => `600 ${f.toFixed(1)}px "IBM Plex Mono", ui-monospace, monospace`;
+
+      const rotulos = NOS.map((n, i) => {
+        const p = pontos[i];
+        const cos = Math.cos(p.a), sen = Math.sin(p.a);
+        const fs = (8.4 + p.frente * 1.6) * k;
+        ctx.font = LETRA(fs);
+        const raioNo = (6.6 + p.frente * 3.6 + brilho[i] * 3) * k;
+        const fora = raioNo + 9 * k;
+        const lado = Math.abs(cos) < .25 ? 0 : (cos > 0 ? 1 : -1);
+        return {
+          n, fs, lado, frente: p.frente, brilho: brilho[i],
+          larg: ctx.measureText(n.sigla).width,
+          alt: fs * 1.2,
+          x: p.x + cos * fora * 1.35,
+          y: p.y + sen * fora + (lado === 0 ? sen * 7 * k : 0)
+        };
+      });
+
+      const porAltura = rotulos.slice().sort((a, b) => a.y - b.y);
+      porAltura.forEach((r, idx) => {
+        for (let j = 0; j < idx; j++) {
+          const o = porAltura[j];
+          // lados opostos do anel nunca se encontram; não vale comparar
+          if (r.lado * o.lado === -1) continue;
+          const perto = Math.abs(r.x - o.x) < (r.larg + o.larg) / 2 + 5 * k;
+          const limiteY = (r.alt + o.alt) / 2 + 2 * k;
+          if (perto && Math.abs(r.y - o.y) < limiteY) r.y = o.y + limiteY;
+        }
+      });
+
+      ctx.textBaseline = "middle";
+      rotulos.forEach(r => {
+        ctx.font = LETRA(r.fs);
+        ctx.textAlign = r.lado === 0 ? "center" : (r.lado > 0 ? "left" : "right");
+        ctx.fillStyle = comAlfa(r.brilho > .3 ? r.n.tom : C.muted,
+                                .35 + r.frente * .45 + r.brilho * .2);
+        ctx.fillText(r.n.sigla, r.x, r.y);
+      });
+      ctx.textAlign = "center";
     }
 
     /* --- dimensionamento e laço ------------------------------------------- */
@@ -2636,6 +2904,102 @@ CI.views = (function () {
     return h("div", { estilo: { position: "relative" } }, cv, botao);
   }
 
+  /* ---- o que está apertado -------------------------------------------------
+     A primeira coisa que alguém precisa saber ao entrar não é quantos projetos
+     existem: é o que está atrasado e o que vence esta semana. As faixas são as
+     mesmas dos avisos por e-mail — vencida, hoje/amanhã, até 3 dias, até 7 —
+     para a Central e a caixa de entrada contarem a mesma história.
+     ---------------------------------------------------------------------- */
+
+  const FAIXAS_PRAZO = [
+    { id: "vencidas", nome: "Não entregues",  tom: "crit", icone: "alerta",
+      texto: "passaram da data e seguem abertas" },
+    { id: "agora",    nome: "Hoje ou amanhã", tom: "warn", icone: "relogio",
+      texto: "entram no prazo nas próximas 24 horas" },
+    { id: "tres",     nome: "Em até 3 dias",  tom: "warn", icone: "relogio",
+      texto: "reta final" },
+    { id: "sete",     nome: "Em até 7 dias",  tom: null,   icone: "relogio",
+      texto: "uma semana pela frente" }
+  ];
+
+  function prazosApertados() {
+    const caixas = { vencidas: [], agora: [], tres: [], sete: [] };
+    db.dados.projetos.forEach(p => {
+      db.etapasDe(p.id).forEach(e => {
+        const v = veredito(e);
+        if (v !== "nao-entregue" && v !== "em-dia") return;
+        const dias = U.diasAte(prazoQueVale(e));
+        if (v === "nao-entregue") caixas.vencidas.push({ p, e, dias });
+        else if (dias <= 1) caixas.agora.push({ p, e, dias });
+        else if (dias <= 3) caixas.tres.push({ p, e, dias });
+        else if (dias <= 7) caixas.sete.push({ p, e, dias });
+      });
+    });
+    Object.values(caixas).forEach(l => l.sort((a, b) => a.dias - b.dias));
+    return caixas;
+  }
+
+  function painelPrazos() {
+    const caixas = prazosApertados();
+    const comConteudo = FAIXAS_PRAZO.filter(f => caixas[f.id].length);
+    const total = comConteudo.reduce((s, f) => s + caixas[f.id].length, 0);
+    const projetosTocados = new Set(
+      comConteudo.flatMap(f => caixas[f.id].map(x => x.p.id))).size;
+
+    if (!total) {
+      return h("section.painel.aviso-prazos.tranquilo.surge",
+        h("div.painel-bd",
+          h("div.prazo-calmo",
+            ic("check"),
+            h("div",
+              h("strong", "Nada vencendo nos próximos 7 dias."),
+              h("p.discreto", { estilo: { fontSize: "12.5px", marginTop: "3px" } },
+                "Nenhuma etapa passou da data e nenhuma entra no prazo esta semana."))
+          )
+        )
+      );
+    }
+
+    const linha = ({ p, e, dias }) => {
+      const dir = p.diretoria_id ? db.diretoria(p.diretoria_id) : null;
+      const quando = dias < 0 ? `${Math.abs(dias)} d atrás`
+                   : dias === 0 ? "hoje"
+                   : dias === 1 ? "amanhã"
+                   : `em ${dias} d`;
+      return h("button.prazo-linha", {
+        type: "button",
+        onclick: () => { location.hash = "#/projeto/" + p.id; },
+        title: `Abrir ${p.nome}`
+      },
+        h("i.prazo-fita", { estilo: { background: dir ? U.corVisivel(dir.cor) : "var(--muted)" } }),
+        h("span.prazo-proj.truncar", p.nome),
+        h("span.prazo-etapa.truncar", `Etapa ${e.numero}: ${e.descricao || "sem descrição"}`),
+        h("span.prazo-resp.truncar", e.responsavel || "sem responsável"),
+        h("span.prazo-quando", quando)
+      );
+    };
+
+    return h("section.painel.aviso-prazos.surge",
+      h("div.painel-hd",
+        h("h2", "O que está apertado"),
+        h("div.acoes",
+          h("span.rotulo", `${total} etapa${total > 1 ? "s" : ""} · ` +
+            `${projetosTocados} projeto${projetosTocados > 1 ? "s" : ""}`))
+      ),
+      h("div.painel-bd",
+        ...comConteudo.map(f => h("div.prazo-faixa",
+          h("div.prazo-faixa-hd" + (f.tom ? "." + f.tom : ""),
+            ic(f.icone),
+            h("strong", f.nome),
+            h("span.rotulo", f.texto),
+            h("span.prazo-conta", String(caixas[f.id].length))
+          ),
+          h("div.prazo-lista", ...caixas[f.id].map(linha))
+        ))
+      )
+    );
+  }
+
   function vInicio() {
     const projetos = db.dados.projetos;
     const internos = projetos.filter(p => p.tipo === "Projeto Interno");
@@ -2646,6 +3010,7 @@ CI.views = (function () {
       h("b", String(valor)), h("span.rotulo", rotulo));
 
     return h("div.view",
+      painelPrazos(),
       h("section.inicio",
         h("div.inicio-cabeca",
           h("span.rotulo", `${(window.CI_CONFIG || {}).EMPRESA || "Adecon"} · ciclo ${(window.CI_CONFIG || {}).ANO_CICLO || new Date().getFullYear()}`),
@@ -2729,6 +3094,12 @@ CI.views = (function () {
 
   let bsFiltro = "Todos";
   let bsNatureza = "ideia";        // o que o formulário está prestes a enviar
+  /* Rascunho do campo de envio. Mora aqui fora para sobreviver aos redesenhos
+     da tela (apoiar uma ideia, trocar o filtro, chegar algo pelo realtime). */
+  let bsRascunho = { titulo: "", descricao: "", tipo: "Iniciativa", autor: "", privada: false };
+  const limparRascunho = () => {
+    bsRascunho = { titulo: "", descricao: "", tipo: "Iniciativa", autor: bsRascunho.autor, privada: bsRascunho.privada };
+  };
   let bsOrdem = "recentes";
   let bsArquivadas = false;
 
@@ -3531,14 +3902,26 @@ CI.views = (function () {
 
   function painelEnvio() {
     let natureza = bsNatureza;
-    let privada = false;   // escolha de quem publica; problema ignora e vai privado
+    /* O rascunho vive fora da função porque a tela inteira é redesenhada a
+       cada apoio dado e a cada troca de filtro. Antes, quem estava escrevendo
+       perdia o texto — e, pior, a trava "Privada" voltava sozinha para o
+       desligado: dava para publicar no mural algo que se queria reservado. */
+    let privada = bsRascunho.privada;
 
     const fTitulo = entrada({
       class: "bs-titulo", placeholder: NATUREZAS[natureza].titulo, maxlength: 160,
+      value: bsRascunho.titulo,
+      oninput: ev => { bsRascunho.titulo = ev.target.value; },
       onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); enviar(); } }
     });
-    const fDesc = area({ rows: 3, placeholder: NATUREZAS[natureza].corpo });
-    const fTipo = selecao(TIPOS_IDEIA, { value: "Iniciativa" });
+    const fDesc = area({
+      rows: 3, placeholder: NATUREZAS[natureza].corpo, value: bsRascunho.descricao,
+      oninput: ev => { bsRascunho.descricao = ev.target.value; }
+    });
+    const fTipo = selecao(TIPOS_IDEIA, {
+      value: bsRascunho.tipo,
+      onchange: ev => { bsRascunho.tipo = ev.target.value; }
+    });
 
     /* O que muda entre ideia e problema é só a pergunta e o tom — os campos são
        os mesmos, porque os dois seguem o mesmo caminho até virar projeto. */
@@ -3564,7 +3947,7 @@ CI.views = (function () {
       }
       reserva.appendChild(h("button.bs-trava" + (privada ? ".ativa" : ""), {
         type: "button", role: "switch", "aria-checked": privada ? "true" : "false",
-        onclick: () => { privada = !privada; pintarReserva(); }
+        onclick: () => { privada = bsRascunho.privada = !privada; pintarReserva(); }
       }, ic(privada ? "cadeado" : "destravar"), privada ? "Privada" : "Deixar privada"));
       reserva.appendChild(h("span.dica", privada
         ? "Não vai para o mural. Só a equipe do funil vê o que você escreveu."
@@ -3591,7 +3974,11 @@ CI.views = (function () {
       pintarReserva();
     }
     const fDir = selecao([["", "Não sei ainda"], ...db.dados.diretorias.map(d => [d.id, d.nome])], { value: "" });
-    const fAutor = entrada({ value: db.perfil?.nome && db.perfil.nome !== "Você" ? db.perfil.nome : "", placeholder: "Seu nome" });
+    const fAutor = entrada({
+      value: bsRascunho.autor || (db.perfil?.nome && db.perfil.nome !== "Você" ? db.perfil.nome : ""),
+      placeholder: "Seu nome",
+      oninput: ev => { bsRascunho.autor = ev.target.value; }
+    });
 
     async function enviar() {
       const n = NATUREZAS[natureza];
@@ -3620,6 +4007,7 @@ CI.views = (function () {
         });
         if (autor) db.salvarPerfil({ nome: autor });
         fTitulo.value = ""; fDesc.value = "";
+        limparRascunho();
         /* Quem manda algo privado precisa saber que chegou — senão parece que
            sumiu, já que não aparece no mural logo abaixo. */
         U.aviso(
@@ -4127,7 +4515,7 @@ CI.views = (function () {
   return {
     vInicio, vPainel, vCronograma, vProjetos, vProjeto, vDiretorias, vImplementacao,
     vIndicadores, vConfig, vBrainstorm,
-    modalProjeto, modalEtapa, gavetaEtapa, gavetaIdeia, buscaGlobal,
+    modalProjeto, modalEtapa, modalCalendario, gavetaEtapa, gavetaIdeia, buscaGlobal,
     /* regras puras, expostas para poderem ser conferidas de fora */
     veredito, ehPrivada
   };
