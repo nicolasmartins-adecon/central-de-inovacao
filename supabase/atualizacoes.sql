@@ -200,6 +200,8 @@ $$;
 -- de Indicadores mostra. Etapa ainda dentro do prazo não entra: não é acerto
 -- nem erro.
 
+-- A versão antiga da view tinha outras colunas; create or replace não renomeia.
+drop view if exists public.placar_prazo_diretoria;
 create or replace view public.placar_prazo_diretoria as
   select
     d.id   as diretoria_id,
